@@ -9,6 +9,8 @@ Responsible for:
   - Camera management
   - Triggering the race track via run_track()
   - Triggering the farm via run_farm()
+  - Triggering the scale house via run_scale_house()
+  - Triggering the shop via run_shop()
 
 All constants, drawing helpers and classes are imported from their
 dedicated modules.
@@ -43,15 +45,25 @@ from glue import (
     near_house,
     run_scale_house,
 )
+from shop import run_shop
 
 
 # ============================================================
 # FARM BUILDING HELPERS
 # ============================================================
 
-FARM_SCALE       = 2           # sprite is drawn at 130x130 -> 260x260 in the world
-FARM_POS         = (120, 130) # top-left of the farm in world coordinates
-FARM_INTERACT_DIST = 120      # how close the player must be to the gate
+FARM_SCALE         = 2           # sprite is drawn at 130x130 -> 260x260 in the world
+FARM_POS           = (120, 130)  # top-left of the farm in world coordinates
+FARM_INTERACT_DIST = 120         # how close the player must be to the gate
+
+
+# ============================================================
+# SHOP BUILDING HELPERS
+# ============================================================
+
+SHOP_SCALE         = 6           # scale factor to make it crisp and well-sized in the world
+SHOP_POS           = (1500, 180) # top-left of the shop in world coordinates
+SHOP_INTERACT_DIST = 120         # how close the player must be to enter the shop
 
 
 def _restore_horse_to_world(
@@ -63,6 +75,64 @@ def _restore_horse_to_world(
         horses.append(horse)
     horse_start_state.setdefault(id(horse), "idle")
     horse.state = horse_start_state[id(horse)]
+
+
+def build_shop_sprite() -> pygame.Surface:
+    """Draw the shop building on a transparent surface using pixel art from the reference image.
+
+    No image file needed. The surface is fully transparent, so the grass
+    background shows through everywhere.
+    """
+    pixels = (
+        ".........................KK",
+        ".........................KK",
+        "........WWWWWWWWWWWWWWWWWWW",
+        "........WYYYYWWWWCCWWCCWWWW",
+        "........WYYYYWWWWCCWWCCWWWW",
+        "........WWWWWWWWWWWWWWWWWWW",
+        "......DDDDDDDDDDDDDDDDDDDDD",
+        "......DDDDDDDDDDDDDDDDDDDDD",
+        "......DMMMMMMMMMMMMMMMMMMMMBB",
+        "......DMGGGGMMWWWWMMGGGGMMMBB",
+        "......DMGGGGMMWWWWMMGGGGMMMBB",
+        "......DMMMMMMMMMMMMMMMMMMMMMB",
+        "......DMMMMMMBBBBMMMMMMMMMMMB",
+        "......DMMMMMMBBBBMMMMMMMMMMMB",
+        "......SSSSSSSSSSSSSSSSSSSSSSS",
+        "......SSSSSSSSSSSSSSSSSSSSSSS",
+        "....KKSSSSSSSSSSSSSSSSSSSKK..",
+        "....KKSSSSSSSSSSSSSSSSSSSKK..",
+    )
+    palette = {
+        ".": (0, 0, 0, 0),          # Transparent background
+        "K": (24, 22, 23),          # Feet/shadow blocks
+        "D": (150, 75, 30),         # Roof trim / top board frame
+        "W": (255, 255, 255),       # White sign background
+        "Y": (210, 210, 50),        # Yellow icons on sign
+        "C": (100, 60, 30),         # Brown rope/lasso icons on sign
+        "M": (130, 80, 35),         # Main wooden walls
+        "G": (50, 200, 200),        # Cyan windows and double doors
+        "B": (100, 60, 30),         # Right side wall depth shading
+        "S": (110, 65, 30),         # Lower foundation / base shading
+    }
+
+    width = max(map(len, pixels))
+    height = len(pixels)
+    img = pygame.Surface((width, height), pygame.SRCALPHA)
+    for y, row in enumerate(pixels):
+        for x, color in enumerate(row):
+            if color != ".":
+                img.set_at((x, y), palette[color])
+
+    return pygame.transform.scale(
+        img, (width * SHOP_SCALE, height * SHOP_SCALE)
+    )
+
+
+def near_shop(player, shop_rect: pygame.Rect) -> bool:
+    """True when the player is close to the shop's entrance (bottom-centre)."""
+    gate_x, gate_y = shop_rect.centerx, shop_rect.bottom
+    return math.hypot(player.x - gate_x, player.y - gate_y) <= SHOP_INTERACT_DIST
 
 
 def build_farm_sprite() -> pygame.Surface:
@@ -228,11 +298,15 @@ def run_world() -> None:
     house_sprite = build_house_sprite()
     house_rect   = house_sprite.get_rect(topleft=HOUSE_POSITION)
 
-    # Horses can't wander onto the track, farm, or house
+    shop_sprite  = build_shop_sprite()
+    shop_rect    = shop_sprite.get_rect(topleft=SHOP_POS)
+
+    # Horses can't wander onto the track, farm, house, or shop
     horse_obstacles = [
         track_rect.inflate(80, 80),
         farm_rect.inflate(80, 80),
         house_rect.inflate(40, 40),
+        shop_rect.inflate(40, 40),
     ]
 
     # --- Game objects ---
@@ -381,6 +455,13 @@ def run_world() -> None:
                         pygame.display.set_caption("Horse Racing World")
                         clock  = pygame.time.Clock()
 
+                    elif near_shop(player, shop_rect):
+                        run_shop()
+                        # Restore world display after the shop
+                        screen = get_screen()
+                        pygame.display.set_caption("Horse Racing World")
+                        clock  = pygame.time.Clock()
+
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if van.open:
                     # Grab a horse in the van
@@ -450,9 +531,10 @@ def run_world() -> None:
         draw_grass(screen, camera_x, camera_y, grass_details, flowers)
         draw_race_track(screen, track_sprite, track_rect, camera_x, camera_y)
 
-        # Farm building (drawn in code, grass shows through)
+        # Farm, House, and Shop buildings (transparent background, grass shows through)
         screen.blit(farm_sprite, (farm_rect.x - camera_x, farm_rect.y - camera_y))
         screen.blit(house_sprite, (house_rect.x - camera_x, house_rect.y - camera_y))
+        screen.blit(shop_sprite, (shop_rect.x - camera_x, shop_rect.y - camera_y))
 
         draw_world_characters(screen, player, horses, camera_x, camera_y)
 
@@ -467,6 +549,8 @@ def run_world() -> None:
                 prompt_text = "Press E to enter the farm"
             elif near_house(player, house_rect):
                 prompt_text = "Press E to enter Glue"
+            elif near_shop(player, shop_rect):
+                prompt_text = "Press E to enter the shop"
 
         if prompt_text:
             prompt    = font.render(prompt_text, True, C.WORLD_WHITE)
