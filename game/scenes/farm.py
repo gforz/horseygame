@@ -1,5 +1,4 @@
-"""
-farm.py — The farm scene.
+"""farm.py — The farm scene.
 
 Shows the yard: sky, fenced pen with a little house, the shed and the van
 trailer. The horses you have caught stand in the van (physics horses built
@@ -10,191 +9,41 @@ shed and close its doors to breed a random half-size foal.
 Press ESC to go back to the world. Closing the window also quits the game.
 """
 
-import random
-
 import pygame
 
-import constants as C
-import ragdoll
-from classes import WorldHorse
-from methods import build_horse_sprite, draw_horses, roll_world_horse_traits
-from shop import get_pixel_hay_sprite, sync_hay
-
-DISPLAY_FLAGS = pygame.SCALED | pygame.RESIZABLE
-
-def get_screen() -> pygame.Surface:
-    """Return the game window, creating it only if it doesn't exist yet."""
-    surf = pygame.display.get_surface()
-    if surf is None or surf.get_size() != (C.WIDTH, C.HEIGHT):
-        surf = pygame.display.set_mode((C.WIDTH, C.HEIGHT), DISPLAY_FLAGS)
-    return surf
-
-
-BASE_W, BASE_H = 742, 419
-
-SKY        = (130, 200, 245)
-GROUND     = (255, 255, 130)
-FENCE      = (255, 170, 50)
-FENCE_DARK = (230, 140, 30)
-HOUSE      = (245, 165, 75)
-HOUSE_DARK = (215, 130, 45)
-ROOF       = (225, 125, 35)
-WINDOW     = (255, 240, 200)
-SHED_ROOF  = (190, 100, 40)
-SHED_LIGHT = (240, 160, 60)
-SHED_WALL  = (205, 115, 45)
-SHED_IN    = (165, 85, 35)
-VAN_BORDER = (130, 200, 240)
-VAN_FILL   = (255, 255, 255)
-VAN_BED    = (150, 150, 160)
-WHEEL      = (20, 20, 20)
-HUB        = (200, 200, 205)
-
-
-def _draw_fence(surf: pygame.Surface, rect: pygame.Rect) -> None:
-    """Orange wooden fence enclosing `rect`."""
-    t = 6
-
-    for y in (rect.top, rect.top + 18, rect.bottom - 28, rect.bottom - 10):
-        pygame.draw.rect(surf, FENCE, (rect.left, y, rect.width, t))
-
-    for x in (rect.left, rect.right - t):
-        pygame.draw.rect(surf, FENCE, (x, rect.top, t, rect.height))
-
-    for x in range(rect.left, rect.right, 44):
-        pygame.draw.rect(surf, FENCE_DARK, (x, rect.top - 2, 8, 28))
-        pygame.draw.rect(surf, FENCE_DARK, (x, rect.bottom - 32, 8, 28))
-
-    pygame.draw.rect(surf, FENCE_DARK, (rect.right - 8, rect.top - 2, 8, 28))
-    pygame.draw.rect(surf, FENCE_DARK, (rect.right - 8, rect.bottom - 32, 8, 28))
-
-
-def _draw_house(surf: pygame.Surface) -> None:
-    pygame.draw.polygon(surf, ROOF, [(190, 26), (210, 0), (282, 0), (300, 26)])
-    pygame.draw.rect(surf, HOUSE, (203, 26, 84, 34))
-    pygame.draw.rect(surf, WINDOW, (216, 32, 16, 14))
-    pygame.draw.rect(surf, WINDOW, (258, 32, 16, 14))
-    pygame.draw.rect(surf, HOUSE_DARK, (216, 32, 16, 14), 2)
-    pygame.draw.rect(surf, HOUSE_DARK, (258, 32, 16, 14), 2)
-
-    for x, c in ((212, (235, 90, 130)), (224, (235, 90, 130)),
-                 (262, (235, 90, 130)), (274, (235, 90, 130))):
-        pygame.draw.rect(surf, (90, 170, 80), (x, 56, 6, 4))
-        pygame.draw.rect(surf, c, (x + 1, 52, 4, 4))
-
-
-def _draw_shed(surf: pygame.Surface) -> None:
-    pygame.draw.rect(surf, SHED_WALL, (386, 78, 316, 126))
-    pygame.draw.rect(surf, SHED_IN, (402, 88, 284, 108))
-    pygame.draw.rect(surf, (140, 70, 25), (402, 190, 284, 8))
-    pygame.draw.polygon(surf, SHED_ROOF, [(375, 84), (544, 0), (713, 84)])
-    pygame.draw.polygon(surf, SHED_LIGHT, [(418, 70), (451, 53), (451, 70)])
-    pygame.draw.polygon(surf, SHED_LIGHT, [(637, 53), (670, 70), (637, 70)])
-    pygame.draw.rect(surf, SHED_ROOF, (375, 80, 338, 8))
-    pygame.draw.rect(surf, (245, 205, 75), (394, 126, 8, 24))
-    pygame.draw.circle(surf, (110, 65, 30), (398, 138), 2)
-
-
-def _draw_van(surf: pygame.Surface) -> None:
-    pygame.draw.rect(surf, VAN_BED, (445, 365, 130, 32))
-    pygame.draw.rect(surf, VAN_BORDER, (372, 250, 358, 142))
-    pygame.draw.rect(surf, VAN_FILL, (380, 258, 342, 126))
-
-    for cx in (475, 535):
-        pygame.draw.circle(surf, WHEEL, (cx, 398), 22)
-        pygame.draw.circle(surf, HUB, (cx, 398), 7)
-
-
-def _draw_grass(surf: pygame.Surface) -> None:
-    """Grass ground with darker/lighter tufts and flowers."""
-    rng = random.Random(7)
-    sky_h = 66
-    pygame.draw.rect(surf, C.GRASS, (0, sky_h, BASE_W, BASE_H - sky_h))
-
-    for _ in range(300):
-        x = rng.randint(0, BASE_W - 5)
-        y = rng.randint(sky_h, BASE_H - 5)
-        pygame.draw.rect(
-            surf,
-            rng.choice([C.DARK_GRASS, C.LIGHT_GRASS, C.GRASS]),
-            (x, y, 5, 5),
-        )
-
-    for _ in range(10):
-        x = rng.randint(0, BASE_W - 16)
-        y = rng.randint(sky_h + 6, BASE_H - 14)
-        pygame.draw.rect(surf, C.DARK_GRASS, (x, y, 14, 7))
-        pygame.draw.rect(surf, C.LIGHT_GRASS, (x + 5, y + 7, 9, 5))
-
-    for _ in range(45):
-        x = rng.randint(0, BASE_W - 4)
-        y = rng.randint(sky_h, BASE_H - 4)
-        pygame.draw.rect(
-            surf,
-            rng.choice([(255, 225, 130), (245, 170, 180), (230, 230, 245)]),
-            (x, y, 3, 3),
-        )
-
-
-def build_farm_scene() -> pygame.Surface:
-    """Render the farm background."""
-    surf = pygame.Surface((BASE_W, BASE_H))
-    surf.fill(SKY)
-    _draw_grass(surf)
-    _draw_shed(surf)
-    _draw_house(surf)
-    _draw_van(surf)
-    return surf
-
-
-def build_fence_overlay() -> pygame.Surface:
-    """The pen fence on a transparent surface."""
-    surf = pygame.Surface((BASE_W, BASE_H), pygame.SRCALPHA)
-    _draw_fence(surf, pygame.Rect(14, 42, 310, 198))
-    return surf
-
-
-def build_shed_doors() -> pygame.Surface:
-    """Draw the closed shed doors."""
-    surf = pygame.Surface((BASE_W, BASE_H), pygame.SRCALPHA)
-    pygame.draw.rect(surf, SHED_WALL, (402, 88, 284, 108))
-    pygame.draw.rect(surf, (125, 62, 28), (402, 88, 284, 108), 5)
-    pygame.draw.rect(surf, SHED_LIGHT, (406, 92, 134, 100))
-    pygame.draw.rect(surf, SHED_LIGHT, (544, 92, 138, 100))
-    pygame.draw.line(surf, SHED_WALL, (406, 92), (540, 192), 4)
-    pygame.draw.line(surf, SHED_WALL, (540, 92), (406, 192), 4)
-    pygame.draw.line(surf, SHED_WALL, (544, 92), (682, 192), 4)
-    pygame.draw.line(surf, SHED_WALL, (682, 92), (544, 192), 4)
-    pygame.draw.circle(surf, (110, 65, 30), (540, 142), 4)
-    pygame.draw.circle(surf, (110, 65, 30), (548, 142), 4)
-    return surf
-
-
-PEN_ZONE = pygame.Rect(14, 42, 310, 198)
-PEN_AREA = pygame.Rect(22, 50, 294, 176)
-VAN_ZONE = pygame.Rect(372, 250, 358, 142)
-VAN_AREA = pygame.Rect(382, 258, 338, 126)
-SHED_ZONE = pygame.Rect(386, 78, 316, 126)
-SHED_AREA = pygame.Rect(402, 88, 284, 108)
-SHED_HANDLE_ZONE = pygame.Rect(392, 124, 14, 32)
-SLEEP_BUTTON_ZONE = pygame.Rect(BASE_W - 90, 12, 78, 28)
-BREEDING_TIME = 3.0
-
-
-def _can_breed(horses: list[WorldHorse]) -> bool:
-    return (
-        len(horses) == 2
-        and all(
-            ragdoll.ensure_stats(horse.traits)["energy"] != "Tired"
-            for horse in horses
-        )
-    )
+from game import constants as C
+from game import daytime
+from game.display import get_screen
+from game.gfx.horse_draw import draw_horses
+from game.items import get_pixel_hay_sprite, hay_sprite_scale, sync_hay
+from game.scenes.farm_art import (
+    BASE_H,
+    BASE_W,
+    BREEDING_TIME,
+    EAT_TIME,
+    PEN_AREA,
+    PEN_ZONE,
+    SHED_AREA,
+    SHED_HANDLE_ZONE,
+    SHED_ZONE,
+    SLEEP_BUTTON_ZONE,
+    VAN_AREA,
+    VAN_ZONE,
+    build_farm_scene,
+    build_fence_overlay,
+    build_shed_doors,
+)
+from game.sim import horse_care, ragdoll
+from game.ui import hud
+from game.ui.iris import Iris
+from game.world_entities import WorldHorse
 
 
 def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = None) -> None:
     """Show the farm until the player presses ESC."""
     screen = get_screen()
     # Use the one hay store shared with the shop (merges in anything passed in)
+    passed_hay = hay_items
     hay_items = sync_hay(hay_items)
     pygame.display.set_caption("Farm")
     clock = pygame.time.Clock()
@@ -220,6 +69,9 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
     sleep_button_zone = to_screen(SLEEP_BUTTON_ZONE)
 
     # HAY POSITION HELPERS
+    def hay_scale() -> int:
+        return hay_sprite_scale(C.WIDTH)
+
     def get_hay_position(item: dict) -> tuple[int, int]:
         """Get a hay bale's screen position, whether it is in the van or farm."""
         if item.get("location") == "farm":
@@ -240,7 +92,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         inside the van, or pushed fully outside the van walls so it never
         sits clipped into them.
         """
-        hay_w, hay_h = get_pixel_hay_sprite(max(2, int(C.WIDTH / 330))).get_size()
+        hay_w, hay_h = get_pixel_hay_sprite(hay_scale()).get_size()
 
         if van_area.collidepoint(hx, hy):
             if settle:
@@ -294,7 +146,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
 
         # If the horse is already dead when added, instantly kill its ragdoll joints
         if horse.traits.get("dead", False):
-            kill_ragdoll(rag, immediate=True)
+            horse_care.kill_ragdoll(rag)
 
         rags.append(rag)
         return rag
@@ -312,19 +164,6 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         )
         ragdoll.place_inside(race, shed_area)
 
-    def place_in_pen(rag, horizontal_position: float) -> None:
-        race = rag.race
-        x = pen_area.left + pen_area.width * horizontal_position
-        y = (
-            pen_area.bottom - 4
-            - race.torso_height / 2 * C.SCALE * race.size_scale
-            - max(race.leg_lengths) - 2
-        )
-        ragdoll.move_horse_by(
-            race, x - race.torso.position.x, y - race.torso.position.y
-        )
-        ragdoll.place_inside(race, pen_area)
-
     for h in van_inventory:
         add_ragdoll(h, "van", van_area)
 
@@ -335,6 +174,8 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
 
     drag = {"rag": None, "ox": 0.0, "oy": 0.0, "hay": None, "hay_ox": 0, "hay_oy": 0}
     selected = None
+    eating_hay: list[dict] = []   # {"rag": rag, "t": seconds eaten}
+    iris = Iris()                 # closes and opens while sleeping
     acc = 0.0
     shed_doors_open = True
     breeding_remaining = 0.0
@@ -352,82 +193,50 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         return [rag for rag in rags if rag.zone == "shed"]
 
     def breeding_ready(parents: list) -> bool:
-        return _can_breed([parent.world_horse for parent in parents])
-
-    def kill_ragdoll(rag, immediate: bool = False) -> None:
-        """Disable motors and remove all joint angle limits so the horse is completely floppy."""
-        rag.world_horse.traits["dead"] = True
-
-        for leg in rag.race.legs:
-            joint = leg.motor
-            joint.enableMotor = False
-            joint.enableLimit = False
-            joint.motorSpeed = 0.0
-            joint.maxMotorTorque = 0.0
-            if hasattr(joint, "lower_limit"):
-                joint.lower_limit = -float("inf")
-            if hasattr(joint, "upper_limit"):
-                joint.upper_limit = float("inf")
-
-        for joint in getattr(rag.race, "joints", []):
-            if hasattr(joint, "enableLimit"):
-                joint.enableLimit = False
-            if hasattr(joint, "lower_limit"):
-                joint.lower_limit = -float("inf")
-            if hasattr(joint, "upper_limit"):
-                joint.upper_limit = float("inf")
-
-        for part in rag.parts:
-            body = getattr(part, "native", None)
-            if body is not None:
-                body.awake = True
+        return horse_care.can_breed([parent.world_horse for parent in parents])
 
     def handle_sleep() -> None:
         nonlocal status_message, status_timer, selected
+
+        daytime.advance(2)   # sleeping passes two stages of the day
 
         if selected in rags and selected.world_horse.traits.get("dead", False):
             selected = None
 
         for rag in list(rags):
-            h = rag.world_horse
-            traits = h.traits
+            horse = rag.world_horse
 
-            if traits.get("dead", False):
+            if horse.traits.get("dead", False):
                 continue
 
-            stats = ragdoll.ensure_stats(traits)
-
-            if stats.get("hunger") == "Starving" or traits.get("hunger") == "Starving":
-                kill_ragdoll(rag)
+            if horse_care.age_one_night(horse.traits) is not None:
+                horse_care.kill_ragdoll(rag)
                 continue
 
-            traits["age"] = traits.get("age", 0) + 1
-
-            if traits["age"] >= 17:
-                kill_ragdoll(rag)
-                continue
-
-            current_hunger = traits.get("hunger", "Full")
-
-            if current_hunger in ("Full", "Fed"):
-                traits["hunger"] = "Hungry"
-            elif current_hunger == "Hungry":
-                traits["hunger"] = "Starving"
-
-            if traits["age"] == 1:
-                traits["size_scale"] = 1.0
-                sprite_right = build_horse_sprite(traits)
-                sprite_left = pygame.transform.flip(
-                    sprite_right, True, False
+            if horse.traits["age"] == 1:
+                horse.sprite_right, horse.sprite_left = horse_care.sprites_for(
+                    horse.traits
                 )
-                h.sprite_right = sprite_right
-                h.sprite_left = sprite_left
 
-            if stats.get("energy") == "Tired":
-                traits["energy"] = "Awake"
-
-        status_message = "A day passed. Horses aged, got hungrier, and rested."
+        status_message = (
+            f"You slept. It is now {daytime.name().lower()}. "
+            "Horses aged, got hungrier, and rested."
+        )
         status_timer = 3.0
+
+    def request_sleep() -> None:
+        """Sleep button: only at noon or night, with the iris wipe."""
+        nonlocal status_message, status_timer
+
+        if iris.active:
+            return
+        if not daytime.can_sleep():
+            status_message = (
+                f"You can only sleep at noon or night. It is {daytime.name().lower()}."
+            )
+            status_timer = 3.0
+            return
+        iris.start((C.WIDTH // 2, C.HEIGHT // 2), handle_sleep)
 
     def toggle_shed_doors() -> None:
         nonlocal shed_doors_open, breeding_remaining
@@ -471,22 +280,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
             ragdoll.freeze(parent.race)
             place_in_shed(parent, 0.25 if index == 0 else 0.75)
 
-        traits = roll_world_horse_traits()
-        traits["size_scale"] = 0.5
-        traits["age"] = 0
-        traits["hunger"] = "Hungry"
-        traits["energy"] = "Tired"
-        traits["dead"] = False
-
-        sprite_right = build_horse_sprite(traits)
-        baby_size = (
-            max(1, round(sprite_right.get_width() * 0.5)),
-            max(1, round(sprite_right.get_height() * 0.5)),
-        )
-        sprite_right = pygame.transform.smoothscale(
-            sprite_right, baby_size
-        )
-        sprite_left = pygame.transform.flip(sprite_right, True, False)
+        traits, sprite_right, sprite_left = horse_care.new_foal()
 
         baby = WorldHorse(
             traits, sprite_right, sprite_left,
@@ -503,6 +297,54 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         breeding_remaining = 0.0
         status_message = "A new foal was born!"
         status_timer = 3.0
+
+    def try_feed_horse(item: dict, hx: int, hy: int) -> bool:
+        """Feed hay dropped on a horse's mouth. True if it is being eaten."""
+        nonlocal status_message, status_timer
+
+        hay_w, hay_h = get_pixel_hay_sprite(hay_scale()).get_size()
+        hay_rect = pygame.Rect(0, 0, hay_w, hay_h)
+        hay_rect.center = (hx, hy)
+
+        target = next(
+            (rag for rag in reversed(rags)
+             if horse_care.mouth_rect_of(rag).inflate(8, 8).colliderect(hay_rect)),
+            None,
+        )
+        if target is None:
+            if any(rag.race.rect().colliderect(hay_rect) for rag in rags):
+                status_message = "Drop the hay at the horse's mouth to feed it."
+                status_timer = 3.0
+            return False
+
+        traits = target.world_horse.traits
+        name = getattr(target.race, "name", "") or traits.get("name", "") or "The horse"
+
+        if traits.get("dead", False):
+            status_message = f"{name} is dead and can't eat."
+            status_timer = 3.0
+            return False
+
+        stats = ragdoll.ensure_stats(traits)
+        if traits.get("hunger", "Full") in ("Full", "Fed"):
+            status_message = f"{name} isn't hungry."
+            status_timer = 3.0
+            return False
+
+        traits["hunger"] = "Full"
+        if isinstance(stats, dict):
+            stats["hunger"] = "Full"
+
+        # The bale is used up: remove it everywhere it is stored
+        for lst in (hay_items, passed_hay):
+            if lst is not None:
+                lst[:] = [x for x in lst if x is not item]
+
+        # Start the eating animation at the horse's mouth
+        eating_hay.append({"rag": target, "t": 0.0})
+        status_message = f"{name} is eating the hay!"
+        status_timer = 3.0
+        return True
 
     def drop(rag, pos) -> None:
         """Let go of a dragged horse."""
@@ -556,6 +398,9 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         mouse_pos = pygame.mouse.get_pos()
 
         for event in pygame.event.get():
+            if iris.active and event.type != pygame.QUIT:
+                continue   # no input while the iris is closing or opening
+
             if event.type == pygame.QUIT:
                 if drag["rag"] is not None:
                     drop(drag["rag"], mouse_pos)
@@ -576,12 +421,12 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if sleep_button_zone.collidepoint(event.pos):
-                    handle_sleep()
+                    request_sleep()
                     continue
 
                 if drag["rag"] is None and drag["hay"] is None:
                     # Check hay first so it can be picked up even near a horse.
-                    hay_sprite = get_pixel_hay_sprite(max(2, int(C.WIDTH / 330)))
+                    hay_sprite = get_pixel_hay_sprite(hay_scale())
                     hay_rect = hay_sprite.get_rect()
 
                     for item in reversed(hay_items):
@@ -646,7 +491,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
 
             if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 if drag["hay"] is not None:
-                    hay_sprite = get_pixel_hay_sprite(max(2, int(C.WIDTH / 330)))
+                    hay_sprite = get_pixel_hay_sprite(hay_scale())
                     hay_sw, hay_sh = hay_sprite.get_size()
 
                     hx = event.pos[0] + drag["hay_ox"]
@@ -661,7 +506,8 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
                         min(C.HEIGHT - hay_sh // 2, hy)
                     )
 
-                    save_hay_position(drag["hay"], hx, hy, settle=True)
+                    if not try_feed_horse(drag["hay"], hx, hy):
+                        save_hay_position(drag["hay"], hx, hy, settle=True)
                     drag["hay"] = None
 
                 elif drag["rag"] is not None:
@@ -671,7 +517,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
 
         # Move the selected hay item anywhere in the farm.
         if drag["hay"] is not None:
-            hay_sprite = get_pixel_hay_sprite(max(2, int(C.WIDTH / 330)))
+            hay_sprite = get_pixel_hay_sprite(hay_scale())
             hay_sw, hay_sh = hay_sprite.get_size()
 
             hx = mouse_pos[0] + drag["hay_ox"]
@@ -712,6 +558,13 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
             if status_timer == 0:
                 status_message = ""
 
+        iris.update(dt)
+
+        for entry in eating_hay[:]:
+            entry["t"] += dt
+            if entry["t"] >= EAT_TIME:
+                eating_hay.remove(entry)
+
         acc += dt
         while acc >= C.PHYSICS_STEP:
             space.step(C.PHYSICS_STEP)
@@ -726,7 +579,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         draw_horses(screen, ordered)
 
         # Draw hay in the van or wherever it has been placed on the farm.
-        hay_sprite = get_pixel_hay_sprite(max(2, int(C.WIDTH / 330)))
+        hay_sprite = get_pixel_hay_sprite(hay_scale())
         hay_sw, hay_sh = hay_sprite.get_size()
 
         for item in hay_items:
@@ -753,6 +606,21 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
                 hay_sprite.get_rect(center=(hx, hy))
             )
 
+        # Hay being eaten: spins and shrinks at the horse's mouth
+        eat_sprite = get_pixel_hay_sprite(hay_scale())
+        for entry in eating_hay:
+            progress = min(1.0, entry["t"] / EAT_TIME)
+            mouth = horse_care.mouth_rect_of(entry["rag"])
+            small = pygame.transform.scale(
+                eat_sprite,
+                (
+                    max(1, int(eat_sprite.get_width() * (1.0 - progress))),
+                    max(1, int(eat_sprite.get_height() * (1.0 - progress))),
+                ),
+            )
+            spun = pygame.transform.rotate(small, progress * 720)
+            screen.blit(spun, spun.get_rect(center=mouth.center))
+
         screen.blit(fence, (0, 0))
 
         if not shed_doors_open:
@@ -760,7 +628,10 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
 
         sleep_btn_rect = to_screen(SLEEP_BUTTON_ZONE)
         pygame.draw.rect(
-            screen, (70, 130, 180), sleep_btn_rect, border_radius=6
+            screen,
+            (70, 130, 180) if daytime.can_sleep() else (120, 130, 140),
+            sleep_btn_rect,
+            border_radius=6,
         )
         pygame.draw.rect(
             screen, (255, 255, 255), sleep_btn_rect, 2, border_radius=6
@@ -772,6 +643,9 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         screen.blit(
             sleep_label,
             sleep_label.get_rect(center=sleep_btn_rect.center),
+        )
+        hud.draw_day_label(
+            screen, sleep_btn_rect.left, sleep_btn_rect.bottom + 6, sleep_btn_rect.width
         )
 
         shed_count = len(shed_rags())
@@ -806,5 +680,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
             ragdoll.draw_stats_panel(
                 screen, selected.race, selected.world_horse.traits
             )
+
+        iris.draw(screen)
 
         pygame.display.flip()

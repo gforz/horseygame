@@ -1,18 +1,9 @@
 """
 main.py — Entry point for the Horsey Game.
+
+Run with:  python main.py
 """
-import pygame
-
-
-def main() -> None:
-    pygame.init()
-
-    # Screen-dependent constants are set when the game modules are imported.
-    from world import run_world
-
-    run_world()
-    pygame.quit()
-
+from game.app import run
 
 if __name__ == "__main__":
-    main()
+    run()

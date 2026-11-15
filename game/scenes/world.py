@@ -1,5 +1,4 @@
-"""
-world.py — Overworld map game loop.
+"""world.py — Overworld map game loop.
 
 Responsible for:
   - Spawning and managing wandering WorldHorse objects
@@ -7,10 +6,7 @@ Responsible for:
   - Lasso mechanic (Lasso class)
   - Van inventory UI (Van class)
   - Camera management
-  - Triggering the race track via run_track()
-  - Triggering the farm via run_farm()
-  - Triggering the scale house via run_scale_house()
-  - Triggering the shop via run_shop()
+  - Triggering the race track, the farm, the scale house and the shop
 
 All constants, drawing helpers and classes are imported from their
 dedicated modules.
@@ -21,54 +17,46 @@ import random
 
 import pygame
 
-import constants as C
-import ragdoll
-from classes import WorldHorse, Lasso, Van, Player, RaceHorse
-from methods import (
-    get_font,
-    build_race_track_sprite,
-    build_horse_sprite,
-    roll_world_horse_traits,
-    draw_grass,
-    draw_race_track,
+from game import constants as C
+from game import daytime
+from game import state
+from game.display import get_screen
+from game.gfx.fonts import get_font
+from game.gfx.horse_draw import draw_horses
+from game.gfx.horse_model import roll_world_horse_traits
+from game.gfx.track_art import build_race_track_sprite, draw_race_track
+from game.gfx.world_art import (
+    build_ground,
+    draw_ground,
     draw_world_characters,
-    draw_horses,
-    update_camera,
     screen_to_world,
+    update_camera,
 )
-import track
-from track import run_track
-from farm import run_farm, get_screen, VAN_BORDER, VAN_FILL, VAN_BED, WHEEL, HUB
-from glue import (
+from game.gfx.world_horse_sprite import build_horse_sprite
+from game.items import get_pixel_hay_sprite, hay_in_van
+from game.items import get_pixel_hay_sprite, hay_in_van
+from game.scenes.farm import run_farm
+from game.scenes.glue import run_scale_house
+from game.scenes.race import run_track
+from game.scenes.shop import run_shop
+from game.sim import ragdoll
+from game.sim.horse_care import kill_ragdoll
+from game.sim.race_horse import RaceHorse
+from game.ui import hud
+from game.world_entities import Lasso, Player, Van, WorldHorse
+from game.world_map import (
+    FARM_POS,
     HOUSE_POSITION,
+    SHOP_POS,
+    build_farm_sprite,
     build_house_sprite,
+    build_shop_sprite,
+    draw_van_interior,
+    near_farm,
     near_house,
-    run_scale_house,
+    near_shop,
+    van_geometry,
 )
-from shop import run_shop, get_pixel_hay_sprite
-
-
-# ============================================================
-# FARM BUILDING HELPERS
-# ============================================================
-
-FARM_SCALE         = 2           # sprite is drawn at 130x130 -> 260x260 in the world
-FARM_POS           = (120, 130)  # top-left of the farm in world coordinates
-FARM_INTERACT_DIST = 120         # how close the player must be to the gate
-
-
-# ============================================================
-# SHOP BUILDING HELPERS
-# ============================================================
-
-SHOP_SCALE         = 6           # scale factor to make it crisp and well-sized in the world
-SHOP_POS           = (1500, 180) # top-left of the shop in world coordinates
-SHOP_INTERACT_DIST = 120         # how close the player must be to enter the shop
-
-
-def _hay_in_van(item: dict) -> bool:
-    """Hay left loose on the farm (location == "farm") is not in the van."""
-    return item.get("location", "van") != "farm"
 
 
 def _restore_horse_to_world(
@@ -82,186 +70,38 @@ def _restore_horse_to_world(
     horse.state = horse_start_state[id(horse)]
 
 
-def build_shop_sprite() -> pygame.Surface:
-    """Draw the shop building on a transparent surface using pixel art from the reference image.
+def _make_world_horses(player: Player, obstacles: list) -> tuple[list, dict]:
+    """Spawn HORSE_COUNT horses at valid, unoccupied positions."""
+    horses: list[WorldHorse] = []
+    horse_start_state: dict[int, str] = {}   # id(horse) -> state it spawned with
 
-    No image file needed. The surface is fully transparent, so the grass
-    background shows through everywhere.
-    """
-    pixels = (
-        ".........................KK",
-        ".........................KK",
-        "........WWWWWWWWWWWWWWWWWWW",
-        "........WYYYYWWWWCCWWCCWWWW",
-        "........WYYYYWWWWCCWWCCWWWW",
-        "........WWWWWWWWWWWWWWWWWWW",
-        "......DDDDDDDDDDDDDDDDDDDDD",
-        "......DDDDDDDDDDDDDDDDDDDDD",
-        "......DMMMMMMMMMMMMMMMMMMMMBB",
-        "......DMGGGGMMWWWWMMGGGGMMMBB",
-        "......DMGGGGMMWWWWMMGGGGMMMBB",
-        "......DMMMMMMMMMMMMMMMMMMMMMB",
-        "......DMMMMMMBBBBMMMMMMMMMMMB",
-        "......DMMMMMMBBBBMMMMMMMMMMMB",
-        "......SSSSSSSSSSSSSSSSSSSSSSS",
-        "......SSSSSSSSSSSSSSSSSSSSSSS",
-        "....KKSSSSSSSSSSSSSSSSSSSKK..",
-        "....KKSSSSSSSSSSSSSSSSSSSKK..",
-    )
-    palette = {
-        ".": (0, 0, 0, 0),          # Transparent background
-        "K": (24, 22, 23),          # Feet/shadow blocks
-        "D": (150, 75, 30),         # Roof trim / top board frame
-        "W": (255, 255, 255),       # White sign background
-        "Y": (210, 210, 50),        # Yellow icons on sign
-        "C": (100, 60, 30),         # Brown rope/lasso icons on sign
-        "M": (130, 80, 35),         # Main wooden walls
-        "G": (50, 200, 200),        # Cyan windows and double doors
-        "B": (100, 60, 30),         # Right side wall depth shading
-        "S": (110, 65, 30),         # Lower foundation / base shading
-    }
+    for _ in range(C.HORSE_COUNT):
+        traits       = roll_world_horse_traits()
+        ragdoll.ensure_stats(traits)
+        sprite_right = build_horse_sprite(traits)
+        sprite_left  = pygame.transform.flip(sprite_right, True, False)
 
-    width = max(map(len, pixels))
-    height = len(pixels)
-    img = pygame.Surface((width, height), pygame.SRCALPHA)
-    for y, row in enumerate(pixels):
-        for x, color in enumerate(row):
-            if color != ".":
-                img.set_at((x, y), palette[color])
+        h = WorldHorse(traits, sprite_right, sprite_left,
+                       x=float(C.WORLD_WIDTH // 2),
+                       y=float(C.WORLD_HEIGHT - 80))
 
-    return pygame.transform.scale(
-        img, (width * SHOP_SCALE, height * SHOP_SCALE)
-    )
+        # Find a valid spawn position
+        for _ in range(200):
+            test_x = random.randint(80, C.WORLD_WIDTH  - 80)
+            test_y = random.randint(150, C.WORLD_HEIGHT - 20)
+            if not h.can_stand(test_x, test_y, obstacles):
+                continue
+            if (test_x - player.x) ** 2 + (test_y - player.y) ** 2 < 400 ** 2:
+                continue
+            h.x = float(test_x)
+            h.y = float(test_y)
+            break
 
+        horse_start_state[id(h)] = h.state
+        horses.append(h)
 
-def near_shop(player, shop_rect: pygame.Rect) -> bool:
-    """True when the player is close to the shop's entrance (bottom-centre)."""
-    gate_x, gate_y = shop_rect.centerx, shop_rect.bottom
-    return math.hypot(player.x - gate_x, player.y - gate_y) <= SHOP_INTERACT_DIST
+    return horses, horse_start_state
 
-
-def build_farm_sprite() -> pygame.Surface:
-    """Draw the farm (fenced yard + house) on a transparent surface.
-
-    No image file needed. The surface is transparent, so the grass
-    background shows through everywhere that isn't fence or house.
-    """
-    size = 130
-    img  = pygame.Surface((size, size), pygame.SRCALPHA)
-
-    fence      = (190, 155, 40)
-    fence_dark = (160, 125, 25)
-    hole       = (0, 0, 0, 0)          # transparent "dashes" in the rails
-
-    rail = 9
-    gate_l, gate_r = 52, 78             # gap in the bottom fence
-
-    # --- Fence rails ---
-    pygame.draw.rect(img, fence, (0, 0, size, rail))                    # top
-    pygame.draw.rect(img, fence, (0, 0, rail, size))                    # left
-    pygame.draw.rect(img, fence, (size - rail, 0, rail, size))           # right
-    pygame.draw.rect(img, fence, (0, size - rail, gate_l, rail))        # bottom-left
-    pygame.draw.rect(img, fence, (gate_r, size - rail, size - gate_r, rail))  # bottom-right
-
-    # Dashed cut-outs along the horizontal rails
-    for x in range(8, size - 12, 14):
-        pygame.draw.rect(img, hole, (x, 3, 9, 3))
-    for x in range(8, gate_l - 8, 14):
-        pygame.draw.rect(img, hole, (x, size - rail + 3, 9, 3))
-    for x in range(gate_r + 6, size - 12, 14):
-        pygame.draw.rect(img, hole, (x, size - rail + 3, 9, 3))
-
-    # Gate posts
-    pygame.draw.rect(img, fence_dark, (gate_l - 4, size - 22, 6, 22))
-    pygame.draw.rect(img, fence_dark, (gate_r - 2, size - 22, 6, 22))
-    pygame.draw.rect(img, fence_dark, (gate_l, size - 26, gate_r - gate_l, 5))  # arch bar
-
-    # --- House ---
-    pygame.draw.rect(img, (246, 175, 69), (18, 42, 54, 36))               # walls
-    pygame.draw.polygon(img, (216, 38, 85),                               # roof
-                        [(11, 44), (28, 20), (62, 20), (79, 44)])
-    pygame.draw.rect(img, (200, 125, 40), (38, 54, 12, 24))               # door
-    pygame.draw.rect(img, (246, 175, 69), (41, 57, 6, 21))                # door inset
-
-    return pygame.transform.scale(
-        img, (size * FARM_SCALE, size * FARM_SCALE)
-    )   # nearest-neighbour keeps it crisp
-
-def van_geometry() -> tuple[pygame.Rect, pygame.Rect, float]:
-    """Return (trailer_rect, inside_rect, scale) for the van interior.
-
-    Same look as the van in farm.py (358 x 142 trailer), but never shorter
-    than a track-sized horse needs to stand in it.
-    """
-    w = int(C.WIDTH * 0.8)
-    k = w / 358
-    b = max(4, int(8 * k))
-    horse_h = (133 + C.MAX_LEG_LENGTH + 40) * C.SCALE      # torso + longest leg + head room
-    h = max(int(142 * k), int(horse_h) + 2 * b)
-    trailer = pygame.Rect(0, 0, w, h)
-    trailer.center = (C.WIDTH // 2, int(C.HEIGHT * 0.45))
-    inside = trailer.inflate(-2 * b, -2 * b)
-    return trailer, inside, k
-
-
-def draw_van_interior(screen: pygame.Surface, dim: pygame.Surface) -> None:
-    """Dim the world and draw the empty van trailer, styled like farm.py."""
-    screen.blit(dim, (0, 0))
-    trailer, inside, k = van_geometry()
-
-    # Truck bed under the trailer
-    bed = pygame.Rect(trailer.left + int(73 * k), trailer.bottom - int(27 * k),
-                      int(130 * k), int(32 * k))
-    pygame.draw.rect(screen, VAN_BED, bed)
-
-    # Trailer: light-blue border, white inside
-    pygame.draw.rect(screen, VAN_BORDER, trailer)
-    pygame.draw.rect(screen, VAN_FILL, inside)
-
-    # Wheels
-    for dx in (103, 163):
-        c = (trailer.left + int(dx * k), trailer.bottom + int(6 * k))
-        pygame.draw.circle(screen, WHEEL, c, int(22 * k))
-        pygame.draw.circle(screen, HUB, c, int(7 * k))
-
-
-def near_farm(player, farm_rect: pygame.Rect) -> bool:
-    """True when the player is close to the farm's gate (bottom-centre)."""
-    gate_x, gate_y = farm_rect.centerx, farm_rect.bottom
-    return math.hypot(player.x - gate_x, player.y - gate_y) <= FARM_INTERACT_DIST
-
-
-def draw_player_money(screen, money_font):
-    """Draws the current money amount flush against the top-left corner with only the bottom-right corner rounded."""
-    money_text = f"${track.player_money}"
-    
-    m_surf = money_font.render(money_text, True, (30, 160, 50))
-    
-    box_w = m_surf.get_width() + C.s(18) * 2
-    box_h = m_surf.get_height() + C.s(12) * 2
-    
-    box_rect = pygame.Rect(-C.s(4), -C.s(4), box_w + C.s(4), box_h + C.s(4))
-    
-    pygame.draw.rect(
-        screen, 
-        (255, 255, 255), 
-        box_rect, 
-        border_bottom_right_radius=C.s(14)
-    )
-    pygame.draw.rect(
-        screen, 
-        (60, 60, 60), 
-        box_rect, 
-        max(1, C.s(2)), 
-        border_bottom_right_radius=C.s(14)
-    )
-    
-    screen.blit(m_surf, (C.s(14), C.s(8)))
-
-
-# ============================================================
-# WORLD ENTRY POINT
-# ============================================================
 
 def run_world() -> None:
     """Run the overworld loop until the player quits."""
@@ -295,6 +135,7 @@ def run_world() -> None:
     random.seed()   # back to random seed for gameplay
 
     # --- Build static sprites (once) ---
+    ground       = build_ground(grass_details, flowers)
     track_sprite = build_race_track_sprite()
     track_rect   = pygame.Rect(660, 280, 620, 460)
 
@@ -320,41 +161,13 @@ def run_world() -> None:
     van    = Van()
     pen_horses: list[WorldHorse] = []   # horses living in the farm pen
 
-    # Spawn world horses
-    horses: list[WorldHorse] = []
-    horse_start_state: dict[int, str] = {}   # id(horse) -> state it spawned with
-    for _ in range(C.HORSE_COUNT):
-        traits       = roll_world_horse_traits()
-        ragdoll.ensure_stats(traits)
-        sprite_right = build_horse_sprite(traits)
-        sprite_left  = pygame.transform.flip(sprite_right, True, False)
-
-        h = WorldHorse(traits, sprite_right, sprite_left,
-                       x=float(C.WORLD_WIDTH // 2),
-                       y=float(C.WORLD_HEIGHT - 80))
-
-        # Find a valid spawn position
-        for _ in range(200):
-            test_x = random.randint(80, C.WORLD_WIDTH  - 80)
-            test_y = random.randint(150, C.WORLD_HEIGHT - 20)
-            if not h.can_stand(test_x, test_y, horse_obstacles):
-                continue
-            if (test_x - player.x) ** 2 + (test_y - player.y) ** 2 < 400 ** 2:
-                continue
-            h.x = float(test_x)
-            h.y = float(test_y)
-            break
-
-        horse_start_state[id(h)] = h.state
-        horses.append(h)
+    horses, horse_start_state = _make_world_horses(player, horse_obstacles)
 
     # --- Camera ---
     camera_x, camera_y = update_camera(player.x, player.y)
 
     # --- Fonts ---
     font         = get_font(24, bold=True)
-    small_font   = get_font(17)
-    title_font   = get_font(30, bold=True)
     money_font   = get_font(C.s(28), bold=True)
 
     # Dark overlay shown behind the van interior
@@ -373,18 +186,7 @@ def run_world() -> None:
 
     def freeze(rag: RaceHorse) -> None:
         """Zero all motion on a horse (used when grabbing / dropping it)."""
-        rag.torso.velocity = (0, 0)
-        rag.torso.angular_velocity = 0
-        rag.head.body.velocity = (0, 0)
-        rag.head.body.angular_velocity = 0
-        rag.head.stop()
-        rag.tail.body.velocity = (0, 0)
-        rag.tail.body.angular_velocity = 0
-        rag.tail.stop()
-        for leg in rag.legs:
-            leg.body.velocity = (0, 0)
-            leg.body.angular_velocity = 0
-            leg.stop()
+        ragdoll.freeze(rag)
 
     def cancel_drag() -> None:
         sel["vh"] = None
@@ -404,6 +206,23 @@ def run_world() -> None:
         h.y = float(player.y + random.uniform(60, 120))
         _restore_horse_to_world(h, horses, horse_start_state)
 
+    def enter_building(action) -> None:
+        """Run a building's scene, then restore the overworld display."""
+        nonlocal screen, clock
+        action()
+        screen = get_screen()
+        pygame.display.set_caption("Horse Racing World")
+        clock  = pygame.time.Clock()
+
+    def sell_caught_horse(horse: WorldHorse, payout: int) -> None:
+        for collection in (van.inventory, horses):
+            if horse in collection:
+                collection.remove(horse)
+        horse_start_state.pop(id(horse), None)
+        state.player_money += payout
+
+    hint_text = ""      # short hint shown at the top of the screen
+    hint_until = 0
 
     running = True
 
@@ -433,41 +252,37 @@ def run_world() -> None:
                     van_acc = 0.0
 
                 if event.key == pygame.K_e and not van.open:
-                    if player.near_track(track_rect):
-                        run_track()
-                        # Restore world display after the race
-                        screen = get_screen()
-                        pygame.display.set_caption("Horse Racing World")
-                        clock  = pygame.time.Clock()
+                    if player.near_track(track_rect) and daytime.is_night():
+                        hint_text = "The track is empty at night. Sleep at the farm."
+                        hint_until = pygame.time.get_ticks() + 2500
+
+                    elif player.near_track(track_rect):
+                        enter_building(run_track)
 
                     elif near_farm(player, farm_rect):
-                        run_farm(van.inventory, pen_horses, hay_items=van.hay_items)
-                        # Restore world display after the farm
-                        screen = get_screen()
-                        pygame.display.set_caption("Horse Racing World")
-                        clock  = pygame.time.Clock()
+                        enter_building(
+                            lambda: run_farm(van.inventory, pen_horses,
+                                             hay_items=van.hay_items)
+                        )
+
+                    elif near_house(player, house_rect) and daytime.is_night():
+                        hint_text = "Glue is closed at night."
+                        hint_until = pygame.time.get_ticks() + 2500
 
                     elif near_house(player, house_rect):
                         caught_horses = list(dict.fromkeys(van.inventory))
+                        enter_building(
+                            lambda: run_scale_house(caught_horses,
+                                                    on_sold=sell_caught_horse,
+                                                    van=van)
+                        )
 
-                        def sell_caught_horse(horse: WorldHorse, payout: int) -> None:
-                            for collection in (van.inventory, horses):
-                                if horse in collection:
-                                    collection.remove(horse)
-                            horse_start_state.pop(id(horse), None)
-                            track.player_money += payout
-
-                        run_scale_house(caught_horses, on_sold=sell_caught_horse, van=van)
-                        screen = get_screen()
-                        pygame.display.set_caption("Horse Racing World")
-                        clock  = pygame.time.Clock()
+                    elif near_shop(player, shop_rect) and daytime.is_night():
+                        hint_text = "The shop is closed at night."
+                        hint_until = pygame.time.get_ticks() + 2500
 
                     elif near_shop(player, shop_rect):
-                        run_shop(van=van)
-                        # Restore world display after the shop
-                        screen = get_screen()
-                        pygame.display.set_caption("Horse Racing World")
-                        clock  = pygame.time.Clock()
+                        enter_building(lambda: run_shop(van=van))
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if van.open:
@@ -479,7 +294,7 @@ def run_world() -> None:
 
                     clicked_hay = None
                     for item in reversed(van.hay_items):
-                        if not _hay_in_van(item):
+                        if not hay_in_van(item):
                             continue
                         hx = van_inside_geom.left + int(item["rel_x"] * van_inside_geom.width)
                         hy = van_inside_geom.top + int(item["rel_y"] * van_inside_geom.height)
@@ -512,7 +327,13 @@ def run_world() -> None:
                     sin_a     = math.sin(angle)
                     target_x  = player.x + cos_a * C.LASSO_MAX_RANGE
                     target_y  = player.y + sin_a * C.LASSO_MAX_RANGE
-                    lasso.throw(player.x, player.y, target_x, target_y)
+                    if lasso.active:
+                        pass
+                    elif state.lasso_count > 0:
+                        lasso.throw(player.x, player.y, target_x, target_y)
+                    else:
+                        hint_text = "No lassos! Buy one at the shop."
+                        hint_until = pygame.time.get_ticks() + 2000
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3 and van.open:
                 # Right-click a horse in the van to show its stats
@@ -547,6 +368,7 @@ def run_world() -> None:
         for h in horses:
             if h.state == "caught" and h not in van.inventory and h not in pen_horses:
                 van.add(h)
+                state.lasso_count = max(0, state.lasso_count - 1)   # one lasso used per horse
 
         for h in horses:
             if not h.traits.get("dead", False):
@@ -557,7 +379,7 @@ def run_world() -> None:
         # --------------------------------------------------------
         # DRAW
         # --------------------------------------------------------
-        draw_grass(screen, camera_x, camera_y, grass_details, flowers)
+        draw_ground(screen, ground, camera_x, camera_y)
         draw_race_track(screen, track_sprite, track_rect, camera_x, camera_y)
 
         # Farm, House, and Shop buildings (transparent background, grass shows through)
@@ -573,13 +395,16 @@ def run_world() -> None:
         prompt_text = None
         if not van.open:
             if player.near_track(track_rect):
-                prompt_text = "Press E to enter the race track"
+                prompt_text = ("The race track is empty at night" if daytime.is_night()
+                               else "Press E to enter the race track")
             elif near_farm(player, farm_rect):
                 prompt_text = "Press E to enter the farm"
             elif near_house(player, house_rect):
-                prompt_text = "Press E to enter Glue"
+                prompt_text = ("Glue is closed at night" if daytime.is_night()
+                               else "Press E to enter Glue")
             elif near_shop(player, shop_rect):
-                prompt_text = "Press E to enter the shop"
+                prompt_text = ("The shop is closed at night" if daytime.is_night()
+                               else "Press E to enter the shop")
 
         if prompt_text:
             prompt    = font.render(prompt_text, True, C.WORLD_WHITE)
@@ -606,17 +431,8 @@ def run_world() -> None:
                     race, parts = ragdoll.build_ragdoll(van_space, len(van_horses), van_inside, h.traits)
                     van_rag = ragdoll.Ragdoll(h, race, parts)
                     if h.traits.get("dead", False):
-                        # Ensure dead traits disable motor/limits instantly inside the van too
-                        for leg in van_rag.race.legs:
-                            joint = leg.motor
-                            joint.enableMotor = False
-                            joint.enableLimit = False
-                            joint.motorSpeed = 0.0
-                            joint.maxMotorTorque = 0.0
-                            if hasattr(joint, "lower_limit"):
-                                joint.lower_limit = -float("inf")
-                            if hasattr(joint, "upper_limit"):
-                                joint.upper_limit = float("inf")
+                        # Dead horses are floppy in the van too
+                        kill_ragdoll(van_rag, wake=False)
                     van_horses[hid] = van_rag
 
             # Dragging: the horse follows the mouse (same method as track.py)
@@ -683,7 +499,7 @@ def run_world() -> None:
                 drag["hay"]["rel_y"] = (ty - van_inside.top) / float(max(1, van_inside.height))
 
             for item in van.hay_items:
-                if not _hay_in_van(item):
+                if not hay_in_van(item):
                     continue
                 hx = van_inside.left + int(item["rel_x"] * van_inside.width)
                 hy = van_inside.top + int(item["rel_y"] * van_inside.height)
@@ -698,6 +514,12 @@ def run_world() -> None:
                 ragdoll.draw_stats_panel(screen, sel["vh"].race, sel["vh"].world_horse.traits)
 
         # Draw Clean Money Display on Top Left
-        draw_player_money(screen, money_font)
+        hud.draw_hud(screen, money_font)
+
+        if pygame.time.get_ticks() < hint_until:
+            hint = font.render(hint_text, True, C.WORLD_WHITE)
+            hint_bg = hint.get_rect(center=(C.WIDTH // 2, C.s(40))).inflate(30, 16)
+            pygame.draw.rect(screen, C.DARK_BROWN, hint_bg, border_radius=8)
+            screen.blit(hint, hint.get_rect(center=hint_bg.center))
 
         pygame.display.flip()

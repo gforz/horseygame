@@ -1,25 +1,30 @@
-"""
-ragdoll.py — Physics horses shared by the world van and the farm.
+"""ragdoll.py — Physics horses shared by the world van, the farm and the shops.
 
 A caught WorldHorse is turned into a track-style ragdoll (torso + two motor
-legs, built exactly like track.create_race) using the horse's own traits.
-Ragdolls never collide with each other, only with the static walls/floors
-you add with add_box_walls().
+legs, built exactly like sim.race_setup.create_race) using the horse's own
+traits. Ragdolls never collide with each other, only with the static
+walls/floors you add with add_box_walls().
 """
 
 import random
 
 import pygame
 
-import constants as C
-from classes import Leg, RaceHorse, create_horse_head, create_horse_tail
-from methods import (
+from game import constants as C
+from game.gfx.fonts import get_font
+from game.gfx.horse_model import (
     get_back_leg_swing,
     get_random_hoof,
     hoof_vertices,
     torso_mass_for_size,
 )
-from physics import PhysicsSpace, torque_to_box2d
+from game.physics import PhysicsSpace, torque_to_box2d
+from game.sim.horse_parts import (
+    Leg,
+    create_horse_head,
+    create_horse_tail,
+)
+from game.sim.race_horse import RaceHorse
 
 GROUP = 99   # one shared shape group -> horses never collide with each other
 
@@ -91,8 +96,6 @@ def ensure_stats(traits: dict) -> dict:
 
 def draw_stats_panel(screen: pygame.Surface, race: RaceHorse, traits: dict) -> None:
     """Small info panel above (or below) a horse showing its stats."""
-    from methods import get_font
-
     stats = ensure_stats(traits)
     title_font = get_font(22, bold=True)
     bold_font = get_font(18, bold=True)
@@ -293,7 +296,7 @@ def build_ragdoll(space: PhysicsSpace, index: int, area: pygame.Rect,
         hoof_shape=hoof_shape,
         size_scale=size_scale,
     )
-    
+
     # If the horse was already dead from stats, apply death state immediately on spawn
     if traits.get("dead", False):
         race_horse.torso.awake = True
@@ -302,7 +305,7 @@ def build_ragdoll(space: PhysicsSpace, index: int, area: pygame.Rect,
 
 
 # ------------------------------------------------------------------
-# Dragging helpers (same method as track.py)
+# Dragging helpers (same method as the race track)
 # ------------------------------------------------------------------
 def freeze(race: RaceHorse) -> None:
     """Zero all motion on a horse (used when grabbing / dropping it)."""

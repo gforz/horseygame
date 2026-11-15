@@ -134,6 +134,13 @@ V_BLACK      = (25, 25, 30)
 V_GRAY       = (150, 150, 160)
 V_GRAY_LIGHT = (185, 185, 195)
 
+# Horse trailer, shared by the farm, the shop, the van and the scale house
+VAN_BORDER = (130, 200, 240)
+VAN_FILL   = (255, 255, 255)
+VAN_BED    = (150, 150, 160)
+WHEEL      = (20, 20, 20)
+HUB        = (200, 200, 205)
+
 
 # ============================================================
 # TRACK LAYOUT
@@ -252,7 +259,7 @@ MAX_FRONT_LEG_FORCE = 60000 * U * U
 LEG_MOTOR_TORQUE_SCALE = 22.0
 BACK_LEG_MAX_TORQUE = 650.0
 
-LEG_SWING_ANGLE  = 0.4
+LEG_SWING_ANGLE  = 0.08
 LEG_ANGLE_SPEED  = 8
 LEG_POSITION_GAIN = 48.0
 ANGLE_TOLERANCE  = 0.025
@@ -263,8 +270,8 @@ FRONT_LEG_DIRECTION = -1
 
 MIN_LEG_WAIT  = 0
 MAX_LEG_WAIT  = 0.1
-MIN_MOVE_TIME = 0.15
-MAX_MOVE_TIME = 0.6
+MIN_MOVE_TIME = 0.1
+MAX_MOVE_TIME = 0.3
 
 
 # ============================================================
