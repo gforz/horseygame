@@ -31,7 +31,7 @@ class WorldHorse:
         self.h             = sprite_right.get_height()
         self.direction     = random.choice([1, -1])
         self.state         = "idle"      # "idle" | "walk" | "caught"
-        self.timer         = random.randint(C.FPS_WORLD, C.FPS_WORLD * 3)
+        self.timer         = random.randint(C.FPS_OVERWORLD, C.FPS_OVERWORLD * 3)
         self.dx            = 0.0
         self.dy            = 0.0
 
@@ -57,14 +57,14 @@ class WorldHorse:
 
     def stop(self) -> None:
         self.state  = "idle"
-        self.timer  = random.randint(C.FPS_WORLD * 1, C.FPS_WORLD * 3)
+        self.timer  = random.randint(C.FPS_OVERWORLD * 1, C.FPS_OVERWORLD * 3)
         self.dx     = 0.0
         self.dy     = 0.0
 
     def start_walking(self) -> None:
         dx, dy = random.choice(C.HORSE_DIRECTIONS)
         self.state  = "walk"
-        self.timer  = random.randint(C.FPS_WORLD * 1, C.FPS_WORLD * 4)
+        self.timer  = random.randint(C.FPS_OVERWORLD * 1, C.FPS_OVERWORLD * 4)
         self.dx     = dx
         self.dy     = dy
         if dx > 0:
@@ -72,19 +72,20 @@ class WorldHorse:
         elif dx < 0:
             self.direction = -1
 
-    def update(self, obstacles: list) -> None:
+    def update(self, obstacles: list, dt: float = 1.0 / C.FPS_OVERWORLD) -> None:
         if self.state == "caught":
             return
 
-        self.timer -= 1
+        self.timer -= dt * C.FPS_OVERWORLD
 
         if self.state == "idle":
             if self.timer <= 0:
                 self.start_walking()
             return
 
-        new_x = self.x + self.dx * C.HORSE_SPEED_WORLD
-        new_y = self.y + self.dy * C.HORSE_SPEED_WORLD
+        movement = C.HORSE_SPEED_WORLD * dt * C.FPS_WORLD
+        new_x = self.x + self.dx * movement
+        new_y = self.y + self.dy * movement
 
         if self.can_stand(new_x, new_y, obstacles):
             self.x = new_x
@@ -380,7 +381,7 @@ class Player:
         )
 
     # ------------------------------------------------------------------
-    def update(self, keys, dt: float = 1.0 / C.FPS_WORLD) -> None:
+    def update(self, keys, dt: float = 1.0 / C.FPS_OVERWORLD) -> None:
         movement = C.MOVE_SPEED * dt * C.FPS_WORLD
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
             self.x        += movement

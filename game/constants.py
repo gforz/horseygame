@@ -15,6 +15,7 @@ else:
     WIDTH, HEIGHT = DEFAULT_WIDTH, DEFAULT_HEIGHT
 FPS_TRACK = 60
 FPS_WORLD = 240
+FPS_OVERWORLD = 60
 
 BASE_WIDTH, BASE_HEIGHT = 1000, 700
 U = min(WIDTH / BASE_WIDTH, HEIGHT / BASE_HEIGHT)
@@ -289,10 +290,10 @@ BET_STEP       = 10
 # ============================================================
 
 MOVE_SPEED  = 1.5
-HORSE_COUNT = 32
+HORSE_COUNT = 128
 
 LASSO_MAX_RANGE = 300.0
-LASSO_SPEED     = 5.0
+LASSO_SPEED     = 15.0
 
 # World horse rendering
 WORLD_HORSE_SCALE  = 0.22

@@ -1,11 +1,12 @@
 """race.py — The race track scene.
 
-Runs race after race until ESC is pressed. Each finished race passes one stage
-of the day; when it becomes night the track is empty, so you are sent back to
-the world.
+Runs race after race until ESC is pressed. Every second finished race passes
+one stage of the day; when it becomes night the track is empty, so you are sent
+back to the world.
 """
 
 import math
+from collections.abc import Callable
 
 import pygame
 
@@ -23,7 +24,10 @@ from game.sim.race_setup import create_race
 from game.ui import hud
 
 
-def run_track(owned_horses: list | None = None) -> None:
+def run_track(
+    owned_horses: list | None = None,
+    on_day_passed: Callable[[], None] | None = None,
+) -> None:
     """Run continuous races within the track scene until ESC is pressed."""
 
     pygame.display.set_caption("Four Horse Racing")
@@ -247,11 +251,13 @@ def run_track(owned_horses: list | None = None) -> None:
         else:
             state.bets_lost += 1
 
-        days_passed = daytime.advance(1)
+        days_passed = daytime.advance_after_race()
         for _ in range(days_passed):
             for horse in owned_horses:
                 if not horse.traits.get("dead", False):
                     horse_care.advance_horse_day(horse)
+            if on_day_passed is not None:
+                on_day_passed()
 
         if track_running:
             if daytime.is_night():

@@ -4,12 +4,31 @@ These are the rules that do not care which scene a horse is standing in, so
 the farm, the van and the scale house can all share them.
 """
 
+import random
+
 import pygame
 
+from game import constants as C
 from game import state
-from game.gfx.horse_model import roll_world_horse_traits
+from game.gfx.horse_model import get_back_leg_swing, roll_world_horse_traits
 from game.gfx.world_horse_sprite import build_horse_sprite
 from game.sim.ragdoll import ensure_stats
+
+HERITABLE_TRAITS = (
+    "back_length",
+    "front_length",
+    "back_hip_x",
+    "front_hip_x",
+    "start_angle",
+    "hoof_length",
+    "hoof_shape",
+    "torso_length",
+    "torso_height",
+    "tail_length",
+    "tail_width",
+    "front_leg_force",
+    "back_leg_swing",
+)
 
 
 def can_breed(horses: list) -> bool:
@@ -120,14 +139,141 @@ def advance_horse_day(horse) -> tuple[str | None, bool]:
     return None, grew_up
 
 
-def new_foal() -> tuple[dict, pygame.Surface, pygame.Surface]:
-    """A newborn foal: half-size, asleep, hungry, and alive."""
+def advance_wild_foal_day(horse) -> bool:
+    """Grow a wild foal up after one day without applying farm hunger rules."""
+    traits = horse.traits
+    if traits.get("size_scale", 1.0) >= 1.0:
+        return False
+
+    traits["age"] = traits.get("age", 0) + 1
+    traits["size_scale"] = 1.0
+    traits["energy"] = "Awake"
+    horse.sprite_right, horse.sprite_left = sprites_for(traits)
+    horse.w, horse.h = horse.sprite_right.get_size()
+    return True
+
+
+def _random_mutation_value(trait: str, traits: dict):
+    if trait == "back_length" or trait == "front_length":
+        return random.uniform(C.MIN_LEG_LENGTH, C.MAX_LEG_LENGTH)
+    if trait == "back_hip_x" or trait == "front_hip_x":
+        hip_limit = traits["torso_length"] / 2 - C.TORSO_HIP_INSET
+        return random.uniform(
+            C.MODEL_CENTRE_X - hip_limit,
+            C.MODEL_CENTRE_X + hip_limit,
+        )
+    if trait == "start_angle":
+        return random.uniform(C.MIN_START_ANGLE, C.MAX_START_ANGLE)
+    if trait == "hoof_length":
+        if traits["hoof_shape"] == C.HOOF_SHAPE_FORWARD_RECT:
+            return random.uniform(
+                C.HOOF_FORWARD_RECT_LENGTH_MIN,
+                C.HOOF_FORWARD_RECT_LENGTH_MAX,
+            )
+        return random.uniform(C.HOOF_LENGTH_MIN, C.HOOF_LENGTH_MAX)
+    if trait == "hoof_shape":
+        return random.choice(C.HOOF_SHAPES)
+    if trait == "torso_length":
+        return random.uniform(C.TORSO_LENGTH_MIN, C.TORSO_LENGTH_MAX)
+    if trait == "torso_height":
+        return random.uniform(C.TORSO_HEIGHT_MIN, C.TORSO_HEIGHT_MAX)
+    if trait == "tail_length":
+        return random.uniform(C.TAIL_LENGTH_MIN, C.TAIL_LENGTH_MAX)
+    if trait == "tail_width":
+        return random.uniform(C.TAIL_WIDTH_MIN, C.TAIL_WIDTH_MAX)
+    if trait == "front_leg_force":
+        return random.uniform(C.MIN_FRONT_LEG_FORCE, C.MAX_FRONT_LEG_FORCE)
+    if trait == "back_leg_swing":
+        return random.uniform(
+            min(C.BACK_LEG_SWING_SHORT, C.BACK_LEG_SWING_LONG)
+            - C.BACK_LEG_SWING_VARIATION,
+            max(C.BACK_LEG_SWING_SHORT, C.BACK_LEG_SWING_LONG)
+            + C.BACK_LEG_SWING_VARIATION,
+        )
+    raise ValueError(f"Unknown heritable trait: {trait}")
+
+
+def _inherited_color(color_a: tuple[int, int, int],
+                     color_b: tuple[int, int, int]) -> tuple[int, int, int]:
+    if random.random() < 0.5:
+        color = random.choice((color_a, color_b))
+        if random.random() >= 0.2:
+            return color
+        return tuple(
+            max(0, min(255, channel + random.randint(-12, 12)))
+            for channel in color
+        )
+
+    blend = random.uniform(0.4, 0.6)
+    return tuple(
+        round(a * blend + b * (1.0 - blend))
+        for a, b in zip(color_a, color_b)
+    )
+
+
+def inherit_traits(parent_a: dict, parent_b: dict) -> dict:
+    """Create genetic traits by independently inheriting from either parent."""
+    for parent in (parent_a, parent_b):
+        parent.setdefault(
+            "front_leg_force",
+            random.uniform(C.MIN_FRONT_LEG_FORCE, C.MAX_FRONT_LEG_FORCE),
+        )
+        parent.setdefault(
+            "back_leg_swing",
+            get_back_leg_swing(parent["back_length"]),
+        )
+
     traits = roll_world_horse_traits()
+    for trait in HERITABLE_TRAITS:
+        inherited_values = [
+            parent[trait]
+            for parent in (parent_a, parent_b)
+            if trait in parent
+        ]
+        if inherited_values:
+            traits[trait] = random.choice(inherited_values)
+
+    traits["color"] = _inherited_color(parent_a["color"], parent_b["color"])
+
+    mutation_chance = 0.1
+    while random.random() < mutation_chance:
+        trait = random.choice(HERITABLE_TRAITS)
+        traits[trait] = _random_mutation_value(trait, traits)
+        mutation_chance *= 0.1
+
+    hip_limit = traits["torso_length"] / 2 - C.TORSO_HIP_INSET
+    traits["back_hip_x"] = max(
+        C.MODEL_CENTRE_X - hip_limit,
+        min(C.MODEL_CENTRE_X + hip_limit, traits["back_hip_x"]),
+    )
+    traits["front_hip_x"] = max(
+        C.MODEL_CENTRE_X - hip_limit,
+        min(C.MODEL_CENTRE_X + hip_limit, traits["front_hip_x"]),
+    )
+    hoof_length_bounds = (
+        (C.HOOF_FORWARD_RECT_LENGTH_MIN, C.HOOF_FORWARD_RECT_LENGTH_MAX)
+        if traits["hoof_shape"] == C.HOOF_SHAPE_FORWARD_RECT
+        else (C.HOOF_LENGTH_MIN, C.HOOF_LENGTH_MAX)
+    )
+    traits["hoof_length"] = max(
+        hoof_length_bounds[0],
+        min(hoof_length_bounds[1], traits["hoof_length"]),
+    )
+
     traits["size_scale"] = 0.5
     traits["age"] = 0
     traits["hunger"] = "Hungry"
     traits["energy"] = "Tired"
     traits["dead"] = False
+    return traits
+
+
+def new_foal(
+    parent_a: dict,
+    parent_b: dict,
+) -> tuple[dict, pygame.Surface, pygame.Surface]:
+    """Build a half-size newborn foal from both parents' traits."""
+    traits = inherit_traits(parent_a, parent_b)
 
     sprite_right = build_horse_sprite(traits)
     baby_size = (

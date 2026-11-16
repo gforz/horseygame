@@ -1,20 +1,23 @@
 """daytime.py — The time of day, shared by every scene.
 
-The day has 4 stages. Each horse race moves the day on one stage, and
-sleeping moves it on two.
+The day has 4 stages. Every second horse race moves the day on one stage,
+and sleeping moves it on two.
 """
 
 STAGES = ["Morning", "Midday", "Noon", "Night"]
+RACES_PER_STAGE = 2
 
 stage = 0   # index into STAGES; the game starts in the morning
 day_index = 0
+races_since_stage = 0
 
 
 def reset() -> None:
     """Return time to the start of a new playthrough."""
-    global stage, day_index
+    global stage, day_index, races_since_stage
     stage = 0
     day_index = 0
+    races_since_stage = 0
 
 
 def name() -> str:
@@ -30,6 +33,17 @@ def is_night() -> bool:
 def can_sleep() -> bool:
     """Sleeping is available at every stage."""
     return True
+
+
+def advance_after_race() -> int:
+    """Advance the day after every second completed race."""
+    global races_since_stage
+    races_since_stage += 1
+    if races_since_stage < RACES_PER_STAGE:
+        return 0
+
+    races_since_stage = 0
+    return advance()
 
 
 def advance(count: int = 1) -> int:

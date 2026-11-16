@@ -1,10 +1,11 @@
 """world_art.py — Overworld ground, camera maths and the player's vehicle.
 
-The ground (grass, tufts, flowers) never changes, so it is rendered once into a
-world-sized surface and blitted each frame instead of drawing ~1000 rectangles.
+The ground (grass, tufts, flowers) never changes, so it is rendered into
+cached chunks and blitted instead of drawing its details every frame.
 """
 
 import random
+from collections import OrderedDict
 
 import pygame
 
@@ -15,6 +16,70 @@ TUFT_PATCHES = [
     (200,200),(450,350),(900,700),(1200,400),
     (1500,800),(700,850),(300,750),(1600,250),
 ]
+
+GROUND_CHUNK_SIZE = 1024
+GROUND_CACHE_CHUNKS = 24
+GROUND_TUFT_COUNT = 3600
+TUFT_DARK_COLOR = (89, 165, 75)
+TUFT_LIGHT_COLOR = (108, 190, 92)
+
+
+class GroundMap:
+    """Lazily rendered, cached chunks of the static overworld ground."""
+
+    def __init__(self, flowers: list):
+        self.chunks: OrderedDict[tuple[int, int], pygame.Surface] = OrderedDict()
+        self.details_by_chunk: dict[tuple[int, int], list] = {}
+
+        details_with_sizes = []
+        details_with_sizes.extend(
+            (x, y, TUFT_DARK_COLOR, 24, 12) for x, y in TUFT_PATCHES
+        )
+        details_with_sizes.extend(
+            (x + 8, y + 12, TUFT_LIGHT_COLOR, 16, 8) for x, y in TUFT_PATCHES
+        )
+        tuft_random = random.Random(12)
+        for _ in range(GROUND_TUFT_COUNT):
+            x = tuft_random.randrange(C.WORLD_WIDTH - 24)
+            y = tuft_random.randrange(C.WORLD_HEIGHT - 20)
+            details_with_sizes.append((x, y, TUFT_DARK_COLOR, 24, 12))
+            details_with_sizes.append((x + 8, y + 12, TUFT_LIGHT_COLOR, 16, 8))
+
+        details_with_sizes.extend((x, y, color, 6, 6) for x, y, color in flowers)
+        for item in details_with_sizes:
+            x, y, _, width, height = item
+            first_x = max(0, x) // GROUND_CHUNK_SIZE
+            first_y = max(0, y) // GROUND_CHUNK_SIZE
+            last_x = min(C.WORLD_WIDTH - 1, x + width - 1) // GROUND_CHUNK_SIZE
+            last_y = min(C.WORLD_HEIGHT - 1, y + height - 1) // GROUND_CHUNK_SIZE
+            for chunk_y in range(first_y, last_y + 1):
+                for chunk_x in range(first_x, last_x + 1):
+                    self.details_by_chunk.setdefault((chunk_x, chunk_y), []).append(item)
+
+    def _get_chunk(self, chunk_x: int, chunk_y: int) -> pygame.Surface:
+        key = (chunk_x, chunk_y)
+        chunk = self.chunks.get(key)
+        if chunk is not None:
+            self.chunks.move_to_end(key)
+            return chunk
+
+        x = chunk_x * GROUND_CHUNK_SIZE
+        y = chunk_y * GROUND_CHUNK_SIZE
+        chunk = pygame.Surface((
+            min(GROUND_CHUNK_SIZE, C.WORLD_WIDTH - x),
+            min(GROUND_CHUNK_SIZE, C.WORLD_HEIGHT - y),
+        ))
+        chunk.fill(C.GRASS)
+        for detail_x, detail_y, color, width, height in self.details_by_chunk.get(key, ()):
+            pygame.draw.rect(
+                chunk, color,
+                (detail_x - x, detail_y - y, width, height),
+            )
+
+        self.chunks[key] = chunk
+        if len(self.chunks) > GROUND_CACHE_CHUNKS:
+            self.chunks.popitem(last=False)
+        return chunk
 
 
 def world_to_screen(x: float, y: float,
@@ -38,35 +103,33 @@ def update_camera(car_x: float, car_y: float) -> tuple:
 # GROUND
 # ============================================================
 
-def build_ground(grass_details: list, flowers: list) -> pygame.Surface:
-    """Render the whole overworld floor once: grass, tufts, patches, flowers."""
-    ground = pygame.Surface((C.WORLD_WIDTH, C.WORLD_HEIGHT))
-    ground.fill(C.GRASS)
-
-    for x, y, color in grass_details:
-        pygame.draw.rect(ground, color, (x, y, 9, 9))
-
-    for x, y in TUFT_PATCHES:
-        pygame.draw.rect(ground, C.DARK_GRASS,  (x,     y,      24, 12))
-        pygame.draw.rect(ground, C.LIGHT_GRASS, (x + 8, y + 12, 16,  8))
-
-    tuft_random = random.Random(12)
-    for _ in range(2400):
-        x = tuft_random.randrange(C.WORLD_WIDTH - 24)
-        y = tuft_random.randrange(C.WORLD_HEIGHT - 20)
-        pygame.draw.rect(ground, C.DARK_GRASS,  (x,     y,      24, 12))
-        pygame.draw.rect(ground, C.LIGHT_GRASS, (x + 8, y + 12, 16,  8))
-
-    for x, y, color in flowers:
-        pygame.draw.rect(ground, color, (x, y, 6, 6))
-
-    return ground
+def build_ground(flowers: list) -> GroundMap:
+    """Index the static ground details for on-demand chunk rendering."""
+    return GroundMap(flowers)
 
 
-def draw_ground(screen: pygame.Surface, ground: pygame.Surface,
+def draw_ground(screen: pygame.Surface, ground: GroundMap,
                 camera_x: float, camera_y: float) -> None:
-    """Blit the pre-rendered floor so it lines up with the camera."""
-    screen.blit(ground, (-int(camera_x), -int(camera_y)))
+    """Blit cached ground chunks covering the camera's view."""
+    left = max(0, int(camera_x))
+    top = max(0, int(camera_y))
+    right = min(C.WORLD_WIDTH, left + C.WIDTH)
+    bottom = min(C.WORLD_HEIGHT, top + C.HEIGHT)
+    first_x = left // GROUND_CHUNK_SIZE
+    first_y = top // GROUND_CHUNK_SIZE
+    last_x = (right - 1) // GROUND_CHUNK_SIZE
+    last_y = (bottom - 1) // GROUND_CHUNK_SIZE
+
+    for chunk_y in range(first_y, last_y + 1):
+        for chunk_x in range(first_x, last_x + 1):
+            chunk = ground._get_chunk(chunk_x, chunk_y)
+            screen.blit(
+                chunk,
+                (
+                    chunk_x * GROUND_CHUNK_SIZE - int(camera_x),
+                    chunk_y * GROUND_CHUNK_SIZE - int(camera_y),
+                ),
+            )
 
 
 # ============================================================

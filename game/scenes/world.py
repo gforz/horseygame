@@ -39,7 +39,7 @@ from game.scenes.farm import run_farm
 from game.scenes.glue import run_scale_house
 from game.scenes.race import run_track
 from game.scenes.shop import run_shop
-from game.sim import ragdoll
+from game.sim import horse_care, ragdoll
 from game.sim.horse_care import kill_ragdoll
 from game.sim.race_horse import RaceHorse
 from game.ui import hud
@@ -104,6 +104,54 @@ def _make_world_horses(player: Player, obstacles: list) -> tuple[list, dict]:
     return horses, horse_start_state
 
 
+def _simulate_wild_horse_day(
+    horses: list[WorldHorse],
+    player: Player,
+    obstacles: list,
+    horse_start_state: dict[int, str],
+) -> None:
+    """Breed wild horses, then cull only horses present at the day's start."""
+    for horse in tuple(horses):
+        if horse.state != "caught" and not horse.traits.get("dead", False):
+            horse_care.advance_wild_foal_day(horse)
+
+    breeders = [
+        horse for horse in horses
+        if horse.state != "caught" and not horse.traits.get("dead", False)
+    ]
+
+    if len(breeders) >= 2:
+        for _ in range(random.randint(55, 65)):
+            parent_a, parent_b = random.sample(breeders, 2)
+            traits, sprite_right, sprite_left = horse_care.new_foal(
+                parent_a.traits, parent_b.traits
+            )
+            foal = WorldHorse(
+                traits, sprite_right, sprite_left, x=0.0, y=0.0
+            )
+
+            for _ in range(200):
+                x = random.randint(80, C.WORLD_WIDTH - 80)
+                y = random.randint(150, C.WORLD_HEIGHT - 20)
+                if not foal.can_stand(x, y, obstacles):
+                    continue
+                if (x - player.x) ** 2 + (y - player.y) ** 2 < 400 ** 2:
+                    continue
+                foal.x, foal.y = float(x), float(y)
+                break
+            else:
+                raise RuntimeError("Unable to find a valid world spawn for a foal.")
+
+            horses.append(foal)
+            horse_start_state[id(foal)] = foal.state
+
+    death_count = min(random.randint(50, 60), len(breeders))
+    for horse in random.sample(breeders, death_count):
+        horse.traits["dead"] = True
+        horses.remove(horse)
+        horse_start_state.pop(id(horse), None)
+
+
 def run_world(open_with_iris: bool = False) -> bool:
     """Run the overworld; return True when the farm requests a restart."""
 
@@ -118,20 +166,19 @@ def run_world(open_with_iris: bool = False) -> bool:
     # --- Static world decorations (seeded for reproducibility) ---
     random.seed(12)
 
-    grass_details = [
-        (
-            random.randint(0, C.WORLD_WIDTH),
-            random.randint(0, C.WORLD_HEIGHT),
-            random.choice([C.DARK_GRASS, C.LIGHT_GRASS, C.GRASS]),
-        )
-        for _ in range(7000)
-    ]
+    # Keep the existing flower placements stable after removing the scattered
+    # grass squares that used to consume this part of the seeded sequence.
+    decor_random = random.Random(12)
+    for _ in range(7000):
+        decor_random.randint(0, C.WORLD_WIDTH)
+        decor_random.randint(0, C.WORLD_HEIGHT)
+        decor_random.choice([C.DARK_GRASS, C.LIGHT_GRASS, C.GRASS])
 
     flowers = [
         (
-            random.randint(0, C.WORLD_WIDTH),
-            random.randint(0, C.WORLD_HEIGHT),
-            random.choice([(255,225,130), (245,170,180), (230,230,245)]),
+            decor_random.randint(0, C.WORLD_WIDTH),
+            decor_random.randint(0, C.WORLD_HEIGHT),
+            decor_random.choice([(255,225,130), (245,170,180), (230,230,245)]),
         )
         for _ in range(100)
     ]
@@ -139,7 +186,7 @@ def run_world(open_with_iris: bool = False) -> bool:
     random.seed()   # back to random seed for gameplay
 
     # --- Build static sprites (once) ---
-    ground       = build_ground(grass_details, flowers)
+    ground       = build_ground(flowers)
     track_sprite = build_race_track_sprite()
     track_rect   = pygame.Rect(0, 0, 620, 460)
     track_rect.center = (C.WORLD_WIDTH // 2, C.WORLD_HEIGHT // 2)
@@ -170,6 +217,13 @@ def run_world(open_with_iris: bool = False) -> bool:
     pen_horses: list[WorldHorse] = []   # horses living in the farm pen
 
     horses, horse_start_state = _make_world_horses(player, horse_obstacles)
+
+    def process_world_day() -> None:
+        _simulate_wild_horse_day(
+            horses, player, horse_obstacles, horse_start_state
+        )
+
+    debug_day_chord_held = False
 
     # --- Camera ---
     camera_x, camera_y = update_camera(player.x, player.y)
@@ -216,11 +270,15 @@ def run_world(open_with_iris: bool = False) -> bool:
 
     def enter_building(action):
         """Run a building's scene, then restore the overworld display."""
-        nonlocal screen, clock
+        nonlocal screen, clock, debug_day_chord_held
         result = action()
         screen = get_screen()
         pygame.display.set_caption("Horse Racing World")
         clock  = pygame.time.Clock()
+        keys = pygame.key.get_pressed()
+        debug_day_chord_held = all(
+            keys[key] for key in (pygame.K_d, pygame.K_a, pygame.K_y)
+        )
         return result
 
     def sell_caught_horse(horse: WorldHorse, payout: int) -> None:
@@ -236,7 +294,7 @@ def run_world(open_with_iris: bool = False) -> bool:
     running = True
 
     while running:
-        frame_dt = clock.tick(C.FPS_WORLD) / 1000.0
+        frame_dt = clock.tick(C.FPS_OVERWORLD) / 1000.0
         dt = min(frame_dt, 0.05)
         if opening_iris is not None:
             opening_iris.update(dt)
@@ -273,13 +331,17 @@ def run_world(open_with_iris: bool = False) -> bool:
 
                     elif player.near_track(track_rect):
                         enter_building(
-                            lambda: run_track([*van.inventory, *pen_horses])
+                            lambda: run_track(
+                                [*van.inventory, *pen_horses],
+                                on_day_passed=process_world_day,
+                            )
                         )
 
                     elif near_farm(player, farm_rect):
                         restart_requested = enter_building(
                             lambda: run_farm(van.inventory, pen_horses,
-                                             hay_items=van.hay_items)
+                                             hay_items=van.hay_items,
+                                             on_day_passed=process_world_day)
                         )
                         if restart_requested:
                             return True
@@ -377,8 +439,26 @@ def run_world(open_with_iris: bool = False) -> bool:
         # --------------------------------------------------------
         # UPDATE
         # --------------------------------------------------------
+        keys = pygame.key.get_pressed()
+        debug_chord_pressed = all(
+            keys[key] for key in (pygame.K_d, pygame.K_a, pygame.K_y)
+        )
+        if (
+            debug_chord_pressed
+            and not debug_day_chord_held
+            and not van.open
+            and (opening_iris is None or not opening_iris.active)
+        ):
+            for _ in range(daytime.advance(len(daytime.STAGES))):
+                for horse in [*van.inventory, *pen_horses]:
+                    if not horse.traits.get("dead", False):
+                        horse_care.advance_horse_day(horse)
+                process_world_day()
+            hint_text = "Debug: advanced one full day"
+            hint_until = pygame.time.get_ticks() + 2500
+        debug_day_chord_held = debug_chord_pressed
+
         if not van.open:
-            keys = pygame.key.get_pressed()
             player.update(keys, frame_dt)
 
         lasso.update(horses, player.x, player.y)
@@ -392,7 +472,7 @@ def run_world(open_with_iris: bool = False) -> bool:
 
         for h in horses:
             if not h.traits.get("dead", False):
-                h.update(horse_obstacles)
+                h.update(horse_obstacles, dt)
 
         camera_x, camera_y = update_camera(player.x, player.y)
 

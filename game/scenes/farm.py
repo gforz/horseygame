@@ -6,9 +6,11 @@ from their own traits). Drag them out of the van into the fenced pen, where
 they can't get out - or drag them back into the van. Put two horses in the
 shed and close its doors to breed a random half-size foal.
 
-Press ESC to go back to the world, or Give Up to restart the playthrough.
+Press ESC to go back to the world, or Give Up and choose Revive to restart.
 Closing the window also quits the game.
 """
+
+from collections.abc import Callable
 
 import pygame
 
@@ -46,8 +48,9 @@ def run_farm(
     van_inventory: list,
     pen_horses: list,
     hay_items: list | None = None,
+    on_day_passed: Callable[[], None] | None = None,
 ) -> bool:
-    """Show the farm; return True when the player restarts the playthrough."""
+    """Show the farm; return True when the player chooses to revive."""
     screen = get_screen()
     # Use the one hay store shared with the shop (merges in anything passed in)
     passed_hay = hay_items
@@ -193,7 +196,7 @@ def run_farm(
     eating_hay: list[dict] = []   # {"rag": rag, "t": seconds eaten}
     iris = Iris()                 # closes and opens while sleeping
     restart_stats: dict[str, int] | None = None
-    restart_summary_time = 0.0
+    revive_button_rect = pygame.Rect(0, 0, 0, 0)
     acc = 0.0
     shed_doors_open = True
     breeding_remaining = 0.0
@@ -228,6 +231,8 @@ def run_farm(
                     horse_care.kill_ragdoll(rag)
                 elif grew_up:
                     grow_ragdoll(rag)
+            if on_day_passed is not None:
+                on_day_passed()
 
         if selected in rags and selected.world_horse.traits.get("dead", False):
             selected = None
@@ -257,7 +262,7 @@ def run_farm(
     def draw_restart_summary(stats: dict[str, int]) -> None:
         title_font = pygame.font.SysFont("Arial", max(24, int(34 * C.U)), bold=True)
         line_font = pygame.font.SysFont("Arial", max(18, int(22 * C.U)))
-        footer_font = pygame.font.SysFont("Arial", max(16, int(18 * C.U)))
+        button_font = pygame.font.SysFont("Arial", max(16, int(20 * C.U)), bold=True)
         lines = (
             f"Money: ${stats['money']}",
             f"Horses caught: {stats['horses_caught']}",
@@ -268,14 +273,21 @@ def run_farm(
         )
         title = title_font.render("Playthrough Stats", True, C.GOLD)
         line_surfaces = [line_font.render(line, True, C.WHITE) for line in lines]
-        footer = footer_font.render("Starting a new game...", True, C.WHITE)
+        button_label = button_font.render("Revive", True, C.WHITE)
+        button = pygame.Rect(
+            0,
+            0,
+            max(C.s(160), button_label.get_width() + C.s(40)),
+            max(C.s(44), button_label.get_height() + C.s(16)),
+        )
         spacing = line_font.get_linesize() + C.s(8)
+        button_gap = C.s(18)
         total_height = (
             title.get_height()
             + C.s(24)
             + len(line_surfaces) * spacing
-            + footer.get_height()
-            + C.s(12)
+            + button_gap
+            + button.height
         )
         y = (C.HEIGHT - total_height) // 2
         screen.blit(
@@ -289,10 +301,12 @@ def run_farm(
                 line.get_rect(center=(C.WIDTH // 2, y + line.get_height() // 2)),
             )
             y += spacing
-        screen.blit(
-            footer,
-            footer.get_rect(center=(C.WIDTH // 2, y + footer.get_height())),
-        )
+        button.topleft = (C.WIDTH // 2 - button.width // 2, y + button_gap)
+        revive_button_rect.size = button.size
+        revive_button_rect.topleft = button.topleft
+        pygame.draw.rect(screen, (65, 130, 75), button, border_radius=8)
+        pygame.draw.rect(screen, C.WHITE, button, 2, border_radius=8)
+        screen.blit(button_label, button_label.get_rect(center=button.center))
 
     def toggle_shed_doors() -> None:
         nonlocal shed_doors_open, breeding_remaining
@@ -336,7 +350,10 @@ def run_farm(
             ragdoll.freeze(parent.race)
             place_in_shed(parent, 0.25 if index == 0 else 0.75)
 
-        traits, sprite_right, sprite_left = horse_care.new_foal()
+        traits, sprite_right, sprite_left = horse_care.new_foal(
+            parents[0].world_horse.traits,
+            parents[1].world_horse.traits,
+        )
 
         baby = WorldHorse(
             traits, sprite_right, sprite_left,
@@ -455,7 +472,14 @@ def run_farm(
 
         for event in pygame.event.get():
             if iris.active and event.type != pygame.QUIT:
-                continue   # no input while the iris is closing or opening
+                revive_clicked = (
+                    restart_stats is not None
+                    and event.type == pygame.MOUSEBUTTONDOWN
+                    and event.button == 1
+                    and revive_button_rect.collidepoint(event.pos)
+                )
+                if not revive_clicked:
+                    continue   # no input while the iris is closing or opening
 
             if event.type == pygame.QUIT:
                 if drag["rag"] is not None:
@@ -471,6 +495,15 @@ def run_farm(
                 if drag["rag"] is not None:
                     drop(drag["rag"], mouse_pos)
                 return False
+
+            if restart_stats is not None:
+                if (
+                    event.type == pygame.MOUSEBUTTONDOWN
+                    and event.button == 1
+                    and revive_button_rect.collidepoint(event.pos)
+                ):
+                    return True
+                continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 toggle_shed_doors()
@@ -580,9 +613,6 @@ def run_farm(
                     acc = 0.0
 
         if restart_stats is not None:
-            restart_summary_time += dt
-            if restart_summary_time >= 3.0:
-                return True
             iris.draw(screen)
             draw_restart_summary(restart_stats)
             pygame.display.flip()
@@ -703,7 +733,7 @@ def run_farm(
         give_up_btn_rect = to_screen(GIVE_UP_BUTTON_ZONE)
         pygame.draw.rect(screen, C.DARK_RED, give_up_btn_rect, border_radius=6)
         pygame.draw.rect(screen, C.WHITE, give_up_btn_rect, 2, border_radius=6)
-        give_up_label = sleep_button_font.render("Give Up", True, C.WHITE)
+        give_up_label = sleep_button_font.render("Suicide", True, C.WHITE)
         screen.blit(give_up_label, give_up_label.get_rect(center=give_up_btn_rect.center))
 
         sleep_btn_rect = to_screen(SLEEP_BUTTON_ZONE)
