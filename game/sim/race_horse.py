@@ -3,6 +3,7 @@
 import pygame
 
 from game import constants as C
+from game.gfx.horse_model import horse_body_geometry
 from game.gfx.horse_draw import (
     draw_horse_body,
     draw_horse_head,
@@ -52,7 +53,7 @@ class RaceHorse:
 
     # ------------------------------------------------------------------
     def rect(self) -> pygame.Rect:
-        """Bounding rectangle used for collision / finish-line detection."""
+        """Bounding rectangle used for selection and collision."""
         x = self.torso.position.x - C.MODEL_CENTRE_X * C.SCALE * self.size_scale
         y = self.torso.position.y - C.MODEL_CENTRE_Y * C.SCALE * self.size_scale
         body_left = C.MODEL_CENTRE_X - self.torso_length / 2
@@ -74,6 +75,17 @@ class RaceHorse:
             int((horse_bottom - horse_top) * C.SCALE * self.size_scale + extra_height),
         )
         return body_rect.union(self.head.rect()).union(self.tail.rect())
+
+    def nose_x(self) -> float:
+        """Return the rightmost world-space x-coordinate of the rendered nose."""
+        nose = horse_body_geometry(self.torso_length, self.torso_height)[8]
+        scale = C.SCALE * self.size_scale
+        return max(
+            self.head.body.local_to_world(
+                ((x - self.head.center_x) * scale, (y - self.head.center_y) * scale)
+            ).x
+            for x, y in nose
+        )
 
     def update(self, dt: float, is_dragged: bool) -> None:
         """Step the leg FSMs; skip if the horse is currently being dragged."""

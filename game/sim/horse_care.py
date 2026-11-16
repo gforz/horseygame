@@ -6,6 +6,7 @@ the farm, the van and the scale house can all share them.
 
 import pygame
 
+from game import state
 from game.gfx.horse_model import roll_world_horse_traits
 from game.gfx.world_horse_sprite import build_horse_sprite
 from game.sim.ragdoll import ensure_stats
@@ -63,8 +64,8 @@ def kill_ragdoll(rag, wake: bool = True) -> None:
                 body.awake = True
 
 
-def age_one_night(traits: dict) -> str | None:
-    """Age a horse by one night and return why it died, or None if it lived.
+def age_one_day(traits: dict) -> str | None:
+    """Age a horse by one full day and return why it died, if applicable.
 
     Starving horses and horses of 17 years or more die; everyone else gets
     hungrier and (if tired) rests.
@@ -100,6 +101,23 @@ def sprites_for(traits: dict) -> tuple[pygame.Surface, pygame.Surface]:
     sprite_right = build_horse_sprite(traits)
     sprite_left = pygame.transform.flip(sprite_right, True, False)
     return sprite_right, sprite_left
+
+
+def advance_horse_day(horse) -> tuple[str | None, bool]:
+    """Update a horse for one new day; return its death reason and growth flag."""
+    was_foal = horse.traits.get("size_scale", 1.0) < 1.0
+    death_reason = age_one_day(horse.traits)
+    if death_reason is not None:
+        if not horse.traits.get("dead", False):
+            state.horses_killed += 1
+        horse.traits["dead"] = True
+        return death_reason, False
+
+    grew_up = was_foal and horse.traits["age"] == 1
+    if grew_up:
+        horse.sprite_right, horse.sprite_left = sprites_for(horse.traits)
+        horse.w, horse.h = horse.sprite_right.get_size()
+    return None, grew_up
 
 
 def new_foal() -> tuple[dict, pygame.Surface, pygame.Surface]:

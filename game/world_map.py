@@ -17,7 +17,10 @@ from game.constants import VAN_BED, VAN_BORDER, VAN_FILL, HUB, WHEEL
 # ============================================================
 
 FARM_SCALE         = 2           # sprite is drawn at 130x130 -> 260x260 in the world
-FARM_POS           = (120, 130)  # top-left of the farm in world coordinates
+FARM_POS           = (
+    C.WORLD_WIDTH * 72 // 100 - 130 * FARM_SCALE // 2,
+    C.WORLD_HEIGHT * 28 // 100 - 130 * FARM_SCALE // 2,
+)
 FARM_INTERACT_DIST = 120         # how close the player must be to the gate
 
 
@@ -80,7 +83,7 @@ def near_farm(player, farm_rect: pygame.Rect) -> bool:
 # ============================================================
 
 SHOP_SCALE         = 6           # scale factor to make it crisp and well-sized in the world
-SHOP_POS           = (1500, 180) # top-left of the shop in world coordinates
+SHOP_POS           = (C.WORLD_WIDTH // 2 + 900, C.WORLD_HEIGHT // 2 - 54)
 SHOP_INTERACT_DIST = 120         # how close the player must be to enter the shop
 
 
@@ -146,7 +149,7 @@ def near_shop(player, shop_rect: pygame.Rect) -> bool:
 # SCALE HOUSE  (Glue)
 # ============================================================
 
-HOUSE_POSITION = (1850, 420)
+HOUSE_POSITION = (C.WORLD_WIDTH // 2 + 2000, C.WORLD_HEIGHT // 2 - 77)
 HOUSE_INTERACT_DIST = 150
 
 

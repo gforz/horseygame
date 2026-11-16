@@ -35,6 +35,15 @@ class Iris:
         self.center = center
         self.on_dark = on_dark
 
+    def start_open(self, center: tuple) -> None:
+        """Begin opening from a fully black screen."""
+        if self.active:
+            return
+        self.phase = "open"
+        self.t = 0.0
+        self.center = center
+        self.on_dark = None
+
     def update(self, dt: float) -> None:
         if self.phase is None:
             return

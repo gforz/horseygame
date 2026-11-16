@@ -26,6 +26,7 @@ SHED_LIGHT = (240, 160, 60)
 SHED_WALL  = (205, 115, 45)
 SHED_IN    = (165, 85, 35)
 
+GIVE_UP_BUTTON_ZONE = pygame.Rect(12, 12, 100, 28)
 
 def _draw_fence(surf: pygame.Surface, rect: pygame.Rect) -> None:
     """Orange wooden fence enclosing `rect`."""

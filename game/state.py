@@ -13,3 +13,21 @@ player_money: int = C.STARTING_MONEY
 # horse uses one up.
 STARTING_LASSOS = 0
 lasso_count: int = STARTING_LASSOS
+
+horses_caught = 0
+horses_killed = 0
+bets_won = 0
+bets_lost = 0
+
+
+def reset() -> None:
+    """Restore the shared values for a new playthrough."""
+    global player_money, lasso_count
+    global horses_caught, horses_killed, bets_won, bets_lost
+
+    player_money = C.STARTING_MONEY
+    lasso_count = STARTING_LASSOS
+    horses_caught = 0
+    horses_killed = 0
+    bets_won = 0
+    bets_lost = 0

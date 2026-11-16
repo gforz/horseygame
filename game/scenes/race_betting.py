@@ -133,6 +133,7 @@ def betting_screen(screen, clock, horses, note="", iris_expand=False):
         b_surf = font.render("BUY TICKET", True, (20, 20, 20) if can_buy else (180, 180, 180))
         screen.blit(b_surf, b_surf.get_rect(center=buy_btn_rect.center))
 
+        hud.draw_time_lighting(screen)
         hud.draw_hud(screen, money_font, show_lasso=False)
 
         if iris_expand:

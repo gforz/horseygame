@@ -43,6 +43,7 @@ from game.sim import ragdoll
 from game.sim.horse_care import kill_ragdoll
 from game.sim.race_horse import RaceHorse
 from game.ui import hud
+from game.ui.iris import Iris
 from game.world_entities import Lasso, Player, Van, WorldHorse
 from game.world_map import (
     FARM_POS,
@@ -103,13 +104,16 @@ def _make_world_horses(player: Player, obstacles: list) -> tuple[list, dict]:
     return horses, horse_start_state
 
 
-def run_world() -> None:
-    """Run the overworld loop until the player quits."""
+def run_world(open_with_iris: bool = False) -> bool:
+    """Run the overworld; return True when the farm requests a restart."""
 
     # --- Screen setup ---
     screen = get_screen()
     pygame.display.set_caption("Horse Racing World")
     clock  = pygame.time.Clock()
+    opening_iris = Iris() if open_with_iris else None
+    if opening_iris is not None:
+        opening_iris.start_open((C.WIDTH // 2, C.HEIGHT // 2))
 
     # --- Static world decorations (seeded for reproducibility) ---
     random.seed(12)
@@ -120,7 +124,7 @@ def run_world() -> None:
             random.randint(0, C.WORLD_HEIGHT),
             random.choice([C.DARK_GRASS, C.LIGHT_GRASS, C.GRASS]),
         )
-        for _ in range(900)
+        for _ in range(7000)
     ]
 
     flowers = [
@@ -137,7 +141,8 @@ def run_world() -> None:
     # --- Build static sprites (once) ---
     ground       = build_ground(grass_details, flowers)
     track_sprite = build_race_track_sprite()
-    track_rect   = pygame.Rect(660, 280, 620, 460)
+    track_rect   = pygame.Rect(0, 0, 620, 460)
+    track_rect.center = (C.WORLD_WIDTH // 2, C.WORLD_HEIGHT // 2)
 
     farm_sprite  = build_farm_sprite()
     farm_rect    = farm_sprite.get_rect(topleft=FARM_POS)
@@ -156,7 +161,10 @@ def run_world() -> None:
     ]
 
     # --- Game objects ---
-    player = Player(x=300.0, y=450.0)
+    player = Player(
+        x=float(farm_rect.centerx),
+        y=float(farm_rect.bottom + 70),
+    )
     lasso  = Lasso()
     van    = Van()
     pen_horses: list[WorldHorse] = []   # horses living in the farm pen
@@ -206,13 +214,14 @@ def run_world() -> None:
         h.y = float(player.y + random.uniform(60, 120))
         _restore_horse_to_world(h, horses, horse_start_state)
 
-    def enter_building(action) -> None:
+    def enter_building(action):
         """Run a building's scene, then restore the overworld display."""
         nonlocal screen, clock
-        action()
+        result = action()
         screen = get_screen()
         pygame.display.set_caption("Horse Racing World")
         clock  = pygame.time.Clock()
+        return result
 
     def sell_caught_horse(horse: WorldHorse, payout: int) -> None:
         for collection in (van.inventory, horses):
@@ -227,13 +236,19 @@ def run_world() -> None:
     running = True
 
     while running:
-        dt = min(clock.tick(C.FPS_WORLD) / 1000.0, 0.05)
+        frame_dt = clock.tick(C.FPS_WORLD) / 1000.0
+        dt = min(frame_dt, 0.05)
+        if opening_iris is not None:
+            opening_iris.update(dt)
         mouse_pos = pygame.mouse.get_pos()
 
         # --------------------------------------------------------
         # EVENTS
         # --------------------------------------------------------
         for event in pygame.event.get():
+
+            if opening_iris is not None and opening_iris.active and event.type != pygame.QUIT:
+                continue
 
             if event.type == pygame.QUIT:
                 running = False
@@ -257,13 +272,17 @@ def run_world() -> None:
                         hint_until = pygame.time.get_ticks() + 2500
 
                     elif player.near_track(track_rect):
-                        enter_building(run_track)
+                        enter_building(
+                            lambda: run_track([*van.inventory, *pen_horses])
+                        )
 
                     elif near_farm(player, farm_rect):
-                        enter_building(
+                        restart_requested = enter_building(
                             lambda: run_farm(van.inventory, pen_horses,
                                              hay_items=van.hay_items)
                         )
+                        if restart_requested:
+                            return True
 
                     elif near_house(player, house_rect) and daytime.is_night():
                         hint_text = "Glue is closed at night."
@@ -360,7 +379,7 @@ def run_world() -> None:
         # --------------------------------------------------------
         if not van.open:
             keys = pygame.key.get_pressed()
-            player.update(keys)
+            player.update(keys, frame_dt)
 
         lasso.update(horses, player.x, player.y)
 
@@ -368,6 +387,7 @@ def run_world() -> None:
         for h in horses:
             if h.state == "caught" and h not in van.inventory and h not in pen_horses:
                 van.add(h)
+                state.horses_caught += 1
                 state.lasso_count = max(0, state.lasso_count - 1)   # one lasso used per horse
 
         for h in horses:
@@ -390,6 +410,9 @@ def run_world() -> None:
         draw_world_characters(screen, player, horses, camera_x, camera_y)
 
         lasso.draw(screen, player.x, player.y, camera_x, camera_y)
+        hud.draw_time_lighting(screen)
+        if daytime.is_night() and not van.open:
+            player.draw_headlights(screen, camera_x, camera_y)
 
         # Interaction prompt
         prompt_text = None
@@ -522,4 +545,9 @@ def run_world() -> None:
             pygame.draw.rect(screen, C.DARK_BROWN, hint_bg, border_radius=8)
             screen.blit(hint, hint.get_rect(center=hint_bg.center))
 
+        if opening_iris is not None:
+            opening_iris.draw(screen)
+
         pygame.display.flip()
+
+    return False

@@ -390,3 +390,21 @@ def place_inside(race: RaceHorse, area: pygame.Rect) -> None:
     tx = max(area.left + margin, min(area.right - margin, race.torso.position.x))
     ty = min(race.torso.position.y, max_y)
     move_horse_by(race, tx - race.torso.position.x, ty - race.torso.position.y)
+
+
+def resize_ragdoll(space: PhysicsSpace, rag: Ragdoll, area: pygame.Rect) -> None:
+    """Rebuild a horse's physics body at its trait-defined size."""
+    old_x = rag.race.torso.position.x
+    race, parts = build_ragdoll(space, rag.race.lane, area, rag.world_horse.traits)
+    space.remove(*rag.parts)
+
+    margin = min(160 * C.SCALE * race.size_scale, area.width * 0.3)
+    x = max(area.left + margin, min(area.right - margin, old_x))
+    y = (
+        area.bottom - 4
+        - race.torso_height / 2 * C.SCALE * race.size_scale
+        - max(race.leg_lengths) - 2
+    )
+    move_horse_by(race, x - race.torso.position.x, y - race.torso.position.y)
+    place_inside(race, area)
+    rag.race, rag.parts = race, parts

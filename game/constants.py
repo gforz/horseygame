@@ -20,8 +20,8 @@ BASE_WIDTH, BASE_HEIGHT = 1000, 700
 U = min(WIDTH / BASE_WIDTH, HEIGHT / BASE_HEIGHT)
 
 WORLD_SIZE = (1000, 700)
-WORLD_WIDTH = 3200
-WORLD_HEIGHT = 2000
+WORLD_WIDTH = 12800
+WORLD_HEIGHT = 8000
 
 
 def s(value):
@@ -288,7 +288,7 @@ BET_STEP       = 10
 # WORLD / PLAYER
 # ============================================================
 
-MOVE_SPEED  = 2.0
+MOVE_SPEED  = 1.5
 HORSE_COUNT = 32
 
 LASSO_MAX_RANGE = 300.0

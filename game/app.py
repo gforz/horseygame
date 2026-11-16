@@ -2,13 +2,24 @@
 
 import pygame
 
-from game.scenes.world import run_world
-
 
 def run() -> None:
-    """Initialise pygame, play from the overworld, then shut down."""
+    """Initialise pygame, run playthroughs, then shut down."""
     pygame.init()
 
-    # Screen-dependent constants are read when the game modules are imported.
-    run_world()
+    # Import scenes after pygame starts so screen-dependent constants can use
+    # the user's desktop resolution.
+    from game import daytime, state
+    from game.items import HAY
+    from game.scenes.shop import reset_shop
+    from game.scenes.world import run_world
+
+    open_with_iris = False
+    while run_world(open_with_iris):
+        state.reset()
+        daytime.reset()
+        HAY.clear()
+        reset_shop()
+        open_with_iris = True
+
     pygame.quit()

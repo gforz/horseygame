@@ -314,6 +314,7 @@ def run_scale_house(horses: list, on_sold=None, van=None) -> None:
         # 5. The pink wall, right pillar and corner, in front of the horses
         glue_art.draw_house_front(screen, treadmill_rect)
 
+        hud.draw_time_lighting(screen)
         hud.draw_hud(screen, get_font(C.s(28), bold=True))
         if pygame.time.get_ticks() < sale_popup_until:
             popup_font = get_font(max(24, C.s(40)), bold=True)

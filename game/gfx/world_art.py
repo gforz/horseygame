@@ -4,6 +4,8 @@ The ground (grass, tufts, flowers) never changes, so it is rendered once into a
 world-sized surface and blitted each frame instead of drawing ~1000 rectangles.
 """
 
+import random
+
 import pygame
 
 from game import constants as C
@@ -45,6 +47,13 @@ def build_ground(grass_details: list, flowers: list) -> pygame.Surface:
         pygame.draw.rect(ground, color, (x, y, 9, 9))
 
     for x, y in TUFT_PATCHES:
+        pygame.draw.rect(ground, C.DARK_GRASS,  (x,     y,      24, 12))
+        pygame.draw.rect(ground, C.LIGHT_GRASS, (x + 8, y + 12, 16,  8))
+
+    tuft_random = random.Random(12)
+    for _ in range(2400):
+        x = tuft_random.randrange(C.WORLD_WIDTH - 24)
+        y = tuft_random.randrange(C.WORLD_HEIGHT - 20)
         pygame.draw.rect(ground, C.DARK_GRASS,  (x,     y,      24, 12))
         pygame.draw.rect(ground, C.LIGHT_GRASS, (x + 8, y + 12, 16,  8))
 

@@ -18,16 +18,18 @@ from game.gfx.fonts import get_font
 from game.gfx.horse_draw import draw_horses
 from game.gfx.track_art import draw_track
 from game.scenes.race_betting import betting_screen
+from game.sim import horse_care
 from game.sim.race_setup import create_race
 from game.ui import hud
 
 
-def run_track() -> None:
+def run_track(owned_horses: list | None = None) -> None:
     """Run continuous races within the track scene until ESC is pressed."""
 
     pygame.display.set_caption("Four Horse Racing")
     screen = get_screen()
     clock  = pygame.time.Clock()
+    owned_horses = list(dict.fromkeys(owned_horses or []))
 
     track_running = True
     space, horses = create_race()
@@ -139,7 +141,7 @@ def run_track() -> None:
                     physics_accumulator -= C.PHYSICS_STEP
 
                 for horse in horses:
-                    if not horse.finished and horse.rect().right >= C.FINISH_X:
+                    if not horse.finished and horse.nose_x() >= C.FINISH_X:
                         horse.finished = True
                         if winner is None:
                             winner = horse.lane
@@ -222,6 +224,7 @@ def run_track() -> None:
 
                 screen.blit(ticket_surf, ticket_rect.topleft)
 
+            hud.draw_time_lighting(screen)
             hud.draw_hud(screen, money_font, show_lasso=False)
 
             if iris_state is not None:
@@ -230,12 +233,6 @@ def run_track() -> None:
                     iris_radius -= int(max_dim * dt * 2.5)
                     if iris_radius <= 0:
                         iris_radius = 0
-                        daytime.advance(1)   # each finished race passes one stage of the day
-                        if daytime.is_night():
-                            track_running = False   # the track is empty at night
-                        else:
-                            space, horses = create_race()  # Generates fresh randomized colors for the new race!
-                            should_expand_iris = True
                         running = False
 
                 overlay = pygame.Surface((C.WIDTH, C.HEIGHT), pygame.SRCALPHA)
@@ -244,3 +241,21 @@ def run_track() -> None:
                 screen.blit(overlay, (0, 0))
 
             pygame.display.flip()
+
+        if payout_done:
+            state.bets_won += 1
+        else:
+            state.bets_lost += 1
+
+        days_passed = daytime.advance(1)
+        for _ in range(days_passed):
+            for horse in owned_horses:
+                if not horse.traits.get("dead", False):
+                    horse_care.advance_horse_day(horse)
+
+        if track_running:
+            if daytime.is_night():
+                track_running = False
+            else:
+                space, horses = create_race()
+                should_expand_iris = True

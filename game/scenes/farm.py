@@ -6,13 +6,15 @@ from their own traits). Drag them out of the van into the fenced pen, where
 they can't get out - or drag them back into the van. Put two horses in the
 shed and close its doors to breed a random half-size foal.
 
-Press ESC to go back to the world. Closing the window also quits the game.
+Press ESC to go back to the world, or Give Up to restart the playthrough.
+Closing the window also quits the game.
 """
 
 import pygame
 
 from game import constants as C
 from game import daytime
+from game import state
 from game.display import get_screen
 from game.gfx.horse_draw import draw_horses
 from game.items import get_pixel_hay_sprite, hay_sprite_scale, sync_hay
@@ -21,6 +23,7 @@ from game.scenes.farm_art import (
     BASE_W,
     BREEDING_TIME,
     EAT_TIME,
+    GIVE_UP_BUTTON_ZONE,
     PEN_AREA,
     PEN_ZONE,
     SHED_AREA,
@@ -39,8 +42,12 @@ from game.ui.iris import Iris
 from game.world_entities import WorldHorse
 
 
-def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = None) -> None:
-    """Show the farm until the player presses ESC."""
+def run_farm(
+    van_inventory: list,
+    pen_horses: list,
+    hay_items: list | None = None,
+) -> bool:
+    """Show the farm; return True when the player restarts the playthrough."""
     screen = get_screen()
     # Use the one hay store shared with the shop (merges in anything passed in)
     passed_hay = hay_items
@@ -67,6 +74,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
     shed_zone, shed_area = to_screen(SHED_ZONE), to_screen(SHED_AREA)
     shed_handle_zone = to_screen(SHED_HANDLE_ZONE)
     sleep_button_zone = to_screen(SLEEP_BUTTON_ZONE)
+    give_up_button_zone = to_screen(GIVE_UP_BUTTON_ZONE)
 
     # HAY POSITION HELPERS
     def hay_scale() -> int:
@@ -151,6 +159,14 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         rags.append(rag)
         return rag
 
+    def grow_ragdoll(rag) -> None:
+        area = {
+            "van": van_area,
+            "pen": pen_area,
+            "shed": shed_area,
+        }[rag.zone]
+        ragdoll.resize_ragdoll(space, rag, area)
+
     def place_in_shed(rag, horizontal_position: float) -> None:
         race = rag.race
         x = shed_area.left + shed_area.width * horizontal_position
@@ -176,6 +192,8 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
     selected = None
     eating_hay: list[dict] = []   # {"rag": rag, "t": seconds eaten}
     iris = Iris()                 # closes and opens while sleeping
+    restart_stats: dict[str, int] | None = None
+    restart_summary_time = 0.0
     acc = 0.0
     shed_doors_open = True
     breeding_remaining = 0.0
@@ -198,45 +216,83 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
     def handle_sleep() -> None:
         nonlocal status_message, status_timer, selected
 
-        daytime.advance(2)   # sleeping passes two stages of the day
+        days_passed = daytime.advance(2)
+        for _ in range(days_passed):
+            for rag in list(rags):
+                horse = rag.world_horse
+                if horse.traits.get("dead", False):
+                    continue
+
+                death_reason, grew_up = horse_care.advance_horse_day(horse)
+                if death_reason is not None:
+                    horse_care.kill_ragdoll(rag)
+                elif grew_up:
+                    grow_ragdoll(rag)
 
         if selected in rags and selected.world_horse.traits.get("dead", False):
             selected = None
 
-        for rag in list(rags):
-            horse = rag.world_horse
-
-            if horse.traits.get("dead", False):
-                continue
-
-            if horse_care.age_one_night(horse.traits) is not None:
-                horse_care.kill_ragdoll(rag)
-                continue
-
-            if horse.traits["age"] == 1:
-                horse.sprite_right, horse.sprite_left = horse_care.sprites_for(
-                    horse.traits
-                )
-
-        status_message = (
-            f"You slept. It is now {daytime.name().lower()}. "
-            "Horses aged, got hungrier, and rested."
-        )
+        status_message = "You slept."
+        if days_passed:
+            status_message += " A day passed; horses' stats were updated."
         status_timer = 3.0
 
     def request_sleep() -> None:
-        """Sleep button: only at noon or night, with the iris wipe."""
-        nonlocal status_message, status_timer
-
+        """Sleep for two stages, with the iris wipe."""
         if iris.active:
             return
-        if not daytime.can_sleep():
-            status_message = (
-                f"You can only sleep at noon or night. It is {daytime.name().lower()}."
-            )
-            status_timer = 3.0
-            return
         iris.start((C.WIDTH // 2, C.HEIGHT // 2), handle_sleep)
+
+    def capture_restart_stats() -> None:
+        nonlocal restart_stats
+        restart_stats = {
+            "money": state.player_money,
+            "horses_caught": state.horses_caught,
+            "horses_killed": state.horses_killed,
+            "bets_won": state.bets_won,
+            "bets_lost": state.bets_lost,
+            "days_survived": daytime.day_index + 1,
+        }
+
+    def draw_restart_summary(stats: dict[str, int]) -> None:
+        title_font = pygame.font.SysFont("Arial", max(24, int(34 * C.U)), bold=True)
+        line_font = pygame.font.SysFont("Arial", max(18, int(22 * C.U)))
+        footer_font = pygame.font.SysFont("Arial", max(16, int(18 * C.U)))
+        lines = (
+            f"Money: ${stats['money']}",
+            f"Horses caught: {stats['horses_caught']}",
+            f"Horses killed: {stats['horses_killed']}",
+            f"Bets won: {stats['bets_won']}",
+            f"Bets lost: {stats['bets_lost']}",
+            f"Days survived: {stats['days_survived']}",
+        )
+        title = title_font.render("Playthrough Stats", True, C.GOLD)
+        line_surfaces = [line_font.render(line, True, C.WHITE) for line in lines]
+        footer = footer_font.render("Starting a new game...", True, C.WHITE)
+        spacing = line_font.get_linesize() + C.s(8)
+        total_height = (
+            title.get_height()
+            + C.s(24)
+            + len(line_surfaces) * spacing
+            + footer.get_height()
+            + C.s(12)
+        )
+        y = (C.HEIGHT - total_height) // 2
+        screen.blit(
+            title,
+            title.get_rect(center=(C.WIDTH // 2, y + title.get_height() // 2)),
+        )
+        y += title.get_height() + C.s(24)
+        for line in line_surfaces:
+            screen.blit(
+                line,
+                line.get_rect(center=(C.WIDTH // 2, y + line.get_height() // 2)),
+            )
+            y += spacing
+        screen.blit(
+            footer,
+            footer.get_rect(center=(C.WIDTH // 2, y + footer.get_height())),
+        )
 
     def toggle_shed_doors() -> None:
         nonlocal shed_doors_open, breeding_remaining
@@ -407,19 +463,27 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
                 if breeding_remaining > 0:
                     complete_breeding()
                 pygame.event.post(pygame.event.Event(pygame.QUIT))
-                return
+                return False
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 if breeding_remaining > 0:
                     complete_breeding()
                 if drag["rag"] is not None:
                     drop(drag["rag"], mouse_pos)
-                return
+                return False
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                 toggle_shed_doors()
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if give_up_button_zone.collidepoint(event.pos):
+                    if not iris.active:
+                        iris.start(
+                            (C.WIDTH // 2, C.HEIGHT // 2),
+                            capture_restart_stats,
+                        )
+                    continue
+
                 if sleep_button_zone.collidepoint(event.pos):
                     request_sleep()
                     continue
@@ -514,6 +578,15 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
                     drop(drag["rag"], event.pos)
                     drag["rag"] = None
                     acc = 0.0
+
+        if restart_stats is not None:
+            restart_summary_time += dt
+            if restart_summary_time >= 3.0:
+                return True
+            iris.draw(screen)
+            draw_restart_summary(restart_stats)
+            pygame.display.flip()
+            continue
 
         # Move the selected hay item anywhere in the farm.
         if drag["hay"] is not None:
@@ -626,10 +699,17 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
         if not shed_doors_open:
             screen.blit(closed_shed_doors, (0, 0))
 
+        hud.draw_time_lighting(screen)
+        give_up_btn_rect = to_screen(GIVE_UP_BUTTON_ZONE)
+        pygame.draw.rect(screen, C.DARK_RED, give_up_btn_rect, border_radius=6)
+        pygame.draw.rect(screen, C.WHITE, give_up_btn_rect, 2, border_radius=6)
+        give_up_label = sleep_button_font.render("Give Up", True, C.WHITE)
+        screen.blit(give_up_label, give_up_label.get_rect(center=give_up_btn_rect.center))
+
         sleep_btn_rect = to_screen(SLEEP_BUTTON_ZONE)
         pygame.draw.rect(
             screen,
-            (70, 130, 180) if daytime.can_sleep() else (120, 130, 140),
+            (70, 130, 180),
             sleep_btn_rect,
             border_radius=6,
         )
@@ -644,10 +724,6 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
             sleep_label,
             sleep_label.get_rect(center=sleep_btn_rect.center),
         )
-        hud.draw_day_label(
-            screen, sleep_btn_rect.left, sleep_btn_rect.bottom + 6, sleep_btn_rect.width
-        )
-
         shed_count = len(shed_rags())
 
         if breeding_remaining > 0:
@@ -682,5 +758,7 @@ def run_farm(van_inventory: list, pen_horses: list, hay_items: list | None = Non
             )
 
         iris.draw(screen)
+        if restart_stats is not None:
+            draw_restart_summary(restart_stats)
 
         pygame.display.flip()

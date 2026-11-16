@@ -10,6 +10,7 @@ import math
 import pygame
 
 from game import constants as C
+from game import daytime
 from game import state
 from game.display import set_game_cursor, set_hand_cursor
 from game.gfx.fonts import get_font
@@ -26,8 +27,7 @@ from game.sim import ragdoll
 from game.sim.horse_care import kill_ragdoll
 from game.ui import hud
 
-# Persistent stock of counter hay: sheaves laid out on the counter (u across,
-# v front-to-back). They do not respawn once bought.
+# Counter hay: sheaves laid out on the counter (u across, v front-to-back).
 _shop_counter_hay = [
     {"id": 0, "u": 0.20, "v": 0.72, "bought": False},
     {"id": 1, "u": 0.50, "v": 0.72, "bought": False},
@@ -37,8 +37,30 @@ _shop_counter_hay = [
     {"id": 5, "u": 0.80, "v": 0.30, "bought": False},
 ]
 
-# Lassos hanging on the pegboard. Does not restock.
-_lasso_stock = {"left": 4}
+# Lassos hanging on the pegboard.
+_LASSO_DAILY_STOCK = 4
+_lasso_stock = {"left": _LASSO_DAILY_STOCK}
+_shop_stock_day: int | None = None
+
+
+def _restock_shop() -> None:
+    global _shop_stock_day
+    if _shop_stock_day == daytime.day_index:
+        return
+
+    for sheaf in _shop_counter_hay:
+        sheaf["bought"] = False
+    _lasso_stock["left"] = _LASSO_DAILY_STOCK
+    _shop_stock_day = daytime.day_index
+
+
+def reset_shop() -> None:
+    """Restore shop stock for a new playthrough."""
+    global _shop_stock_day
+    for sheaf in _shop_counter_hay:
+        sheaf["bought"] = False
+    _lasso_stock["left"] = _LASSO_DAILY_STOCK
+    _shop_stock_day = None
 
 
 def run_shop(van=None) -> None:
@@ -47,6 +69,7 @@ def run_shop(van=None) -> None:
     if screen is None:
         raise RuntimeError("The display must be initialized before entering the shop.")
 
+    _restock_shop()
     set_game_cursor()
     pygame.display.set_caption("Horse-Mart")
     clock = pygame.time.Clock()
@@ -364,7 +387,6 @@ def run_shop(van=None) -> None:
         # --- DRAWING ---
         shop_art.draw_room(screen, room)
         shop_art.draw_title(screen, room)
-        hud.draw_hud(screen, get_font(C.s(28), bold=True))
         shop_art.draw_lasso_board(screen, room, lasso_pixel, _lasso_stock["left"], hover_lasso)
         shop_art.draw_price_board(screen, room, _lasso_stock["left"])
         shop_art.draw_counter(screen, room)
@@ -436,4 +458,6 @@ def run_shop(van=None) -> None:
             pygame.draw.rect(screen, GOLD, msg_rect.inflate(30, 16), 2, border_radius=8)
             screen.blit(msg_surf, msg_rect)
 
+        hud.draw_time_lighting(screen)
+        hud.draw_hud(screen, get_font(C.s(28), bold=True))
         pygame.display.flip()

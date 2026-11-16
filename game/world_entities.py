@@ -374,19 +374,24 @@ class Player:
 
         self._sprite_right = build_vehicle_sprite(flip=False)
         self._sprite_left  = build_vehicle_sprite(flip=True)
+        self._headlight_beam_right = self._build_headlight_beam()
+        self._headlight_beam_left = pygame.transform.flip(
+            self._headlight_beam_right, True, False
+        )
 
     # ------------------------------------------------------------------
-    def update(self, keys) -> None:
+    def update(self, keys, dt: float = 1.0 / C.FPS_WORLD) -> None:
+        movement = C.MOVE_SPEED * dt * C.FPS_WORLD
         if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-            self.x        += C.MOVE_SPEED
+            self.x        += movement
             self.direction = 1
         if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-            self.x        -= C.MOVE_SPEED
+            self.x        -= movement
             self.direction = -1
         if keys[pygame.K_UP] or keys[pygame.K_w]:
-            self.y -= C.MOVE_SPEED
+            self.y -= movement
         if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-            self.y += C.MOVE_SPEED
+            self.y += movement
 
         self.x = max(45, min(C.WORLD_WIDTH  - 45, self.x))
         self.y = max(45, min(C.WORLD_HEIGHT - 45, self.y))
@@ -402,6 +407,60 @@ class Player:
         sy = int(self.y - camera_y)
         sprite = self._sprite_right if self.direction == 1 else self._sprite_left
         screen.blit(sprite, sprite.get_rect(center=(sx, sy)))
+
+    @staticmethod
+    def _build_headlight_beam() -> pygame.Surface:
+        beam = pygame.Surface((500, 260), pygame.SRCALPHA)
+        for source_y in (125, 145):
+            pygame.draw.polygon(
+                beam,
+                (255, 215, 145, 22),
+                [
+                    (0, source_y - 4),
+                    (500, source_y - 105),
+                    (500, source_y + 105),
+                    (0, source_y + 4),
+                ],
+            )
+            pygame.draw.polygon(
+                beam,
+                (255, 238, 190, 38),
+                [
+                    (0, source_y - 3),
+                    (340, source_y - 48),
+                    (340, source_y + 48),
+                    (0, source_y + 3),
+                ],
+            )
+        return beam
+
+    def draw_headlights(
+        self,
+        screen: pygame.Surface,
+        camera_x: float,
+        camera_y: float,
+    ) -> None:
+        sx = int(self.x - camera_x)
+        sy = int(self.y - camera_y)
+        sprite = self._sprite_right if self.direction == 1 else self._sprite_left
+        sprite_rect = sprite.get_rect(center=(sx, sy))
+        beam = (
+            self._headlight_beam_right
+            if self.direction == 1
+            else self._headlight_beam_left
+        )
+
+        if self.direction == 1:
+            front_x = sprite_rect.right - 6
+            beam_x = front_x
+        else:
+            front_x = sprite_rect.left
+            beam_x = front_x - beam.get_width()
+
+        beam_y = sy - beam.get_height() // 2 + 10
+        screen.blit(beam, (beam_x, beam_y))
+        for lamp_y in (sy + 3, sy + 13):
+            pygame.draw.rect(screen, (255, 247, 190), (front_x, lamp_y, 6, 6))
 
     @property
     def feet_y(self) -> float:
