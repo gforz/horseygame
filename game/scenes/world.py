@@ -56,6 +56,7 @@ from game.world_map import (
     near_farm,
     near_house,
     near_shop,
+    draw_world_map,
     van_geometry,
 )
 
@@ -290,6 +291,7 @@ def run_world(open_with_iris: bool = False) -> bool:
 
     hint_text = ""      # short hint shown at the top of the screen
     hint_until = 0
+    world_map_open = False
 
     running = True
 
@@ -313,18 +315,23 @@ def run_world(open_with_iris: bool = False) -> bool:
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    if van.open:
+                    if world_map_open:
+                        world_map_open = False
+                    elif van.open:
                         cancel_drag()
                         van.toggle()
                     else:
                         running = False
 
-                if event.key == pygame.K_v:
+                if event.key == pygame.K_m and not van.open:
+                    world_map_open = not world_map_open
+
+                if event.key == pygame.K_v and not world_map_open:
                     cancel_drag()
                     van.toggle()
                     van_acc = 0.0
 
-                if event.key == pygame.K_e and not van.open:
+                if event.key == pygame.K_e and not van.open and not world_map_open:
                     if player.near_track(track_rect) and daytime.is_night():
                         hint_text = "The track is empty at night. Sleep at the farm."
                         hint_until = pygame.time.get_ticks() + 2500
@@ -399,6 +406,8 @@ def run_world(open_with_iris: bool = False) -> bool:
                                 van_acc = 0.0
                                 break
                 else:
+                    if world_map_open:
+                        continue
                     # Throw lasso
                     world_mx, world_my = screen_to_world(
                         mouse_pos[0], mouse_pos[1], camera_x, camera_y
@@ -458,10 +467,11 @@ def run_world(open_with_iris: bool = False) -> bool:
             hint_until = pygame.time.get_ticks() + 2500
         debug_day_chord_held = debug_chord_pressed
 
-        if not van.open:
+        if not van.open and not world_map_open:
             player.update(keys, frame_dt)
 
-        lasso.update(horses, player.x, player.y)
+        if not world_map_open:
+            lasso.update(horses, player.x, player.y)
 
         # Add freshly caught horses to van
         for h in horses:
@@ -470,9 +480,10 @@ def run_world(open_with_iris: bool = False) -> bool:
                 state.horses_caught += 1
                 state.lasso_count = max(0, state.lasso_count - 1)   # one lasso used per horse
 
-        for h in horses:
-            if not h.traits.get("dead", False):
-                h.update(horse_obstacles, dt)
+        if not world_map_open:
+            for h in horses:
+                if not h.traits.get("dead", False):
+                    h.update(horse_obstacles, dt)
 
         camera_x, camera_y = update_camera(player.x, player.y)
 
@@ -624,6 +635,17 @@ def run_world(open_with_iris: bool = False) -> bool:
             hint_bg = hint.get_rect(center=(C.WIDTH // 2, C.s(40))).inflate(30, 16)
             pygame.draw.rect(screen, C.DARK_BROWN, hint_bg, border_radius=8)
             screen.blit(hint, hint.get_rect(center=hint_bg.center))
+
+        if world_map_open:
+            draw_world_map(
+                screen,
+                player,
+                track_rect,
+                farm_rect,
+                house_rect,
+                shop_rect,
+                daytime.is_night(),
+            )
 
         if opening_iris is not None:
             opening_iris.draw(screen)

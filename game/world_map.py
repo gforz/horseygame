@@ -11,6 +11,123 @@ import pygame
 
 from game import constants as C
 from game.constants import VAN_BED, VAN_BORDER, VAN_FILL, HUB, WHEEL
+from game.gfx.fonts import get_font
+
+
+# ============================================================
+# WORLD MAP OVERLAY
+# ============================================================
+
+def draw_world_map(
+    screen: pygame.Surface,
+    player,
+    track_rect: pygame.Rect,
+    farm_rect: pygame.Rect,
+    house_rect: pygame.Rect,
+    shop_rect: pygame.Rect,
+    nighttime: bool,
+) -> None:
+    """Draw a full-world overview with labelled points of interest."""
+    overlay = pygame.Surface((C.WIDTH, C.HEIGHT), pygame.SRCALPHA)
+    overlay.fill((18, 24, 20, 220))
+    screen.blit(overlay, (0, 0))
+
+    panel_w = min(C.WIDTH - C.s(40), C.s(1700))
+    panel_h = min(C.HEIGHT - C.s(40), C.s(980))
+    panel = pygame.Rect(
+        (C.WIDTH - panel_w) // 2,
+        (C.HEIGHT - panel_h) // 2,
+        panel_w,
+        panel_h,
+    )
+    pygame.draw.rect(screen, (48, 74, 48), panel, border_radius=C.s(18))
+    pygame.draw.rect(screen, C.GOLD, panel, C.s(4), border_radius=C.s(18))
+
+    title = get_font(C.s(34), bold=True).render("World Map", True, C.WORLD_WHITE)
+    screen.blit(title, title.get_rect(midtop=(panel.centerx, panel.top + C.s(18))))
+
+    padding = C.s(30)
+    map_top = panel.top + C.s(78)
+    map_bottom = panel.bottom - C.s(52)
+    map_rect = pygame.Rect(
+        panel.left + padding,
+        map_top,
+        panel.width - padding * 2,
+        map_bottom - map_top,
+    )
+
+    pygame.draw.rect(screen, C.GRASS, map_rect, border_radius=C.s(10))
+    pygame.draw.rect(screen, (205, 190, 125), map_rect, C.s(3), border_radius=C.s(10))
+
+    scale_x = map_rect.width / C.WORLD_WIDTH
+    scale_y = map_rect.height / C.WORLD_HEIGHT
+
+    def world_to_map(x: float, y: float) -> tuple[int, int]:
+        return (
+            int(map_rect.left + x * scale_x),
+            int(map_rect.top + y * scale_y),
+        )
+
+    # Simple dirt roads help the POIs read as part of one connected world.
+    road = (190, 155, 95)
+    track_pos = world_to_map(track_rect.centerx, track_rect.centery)
+    farm_pos = world_to_map(farm_rect.centerx, farm_rect.centery)
+    shop_pos = world_to_map(shop_rect.centerx, shop_rect.centery)
+    house_pos = world_to_map(house_rect.centerx, house_rect.centery)
+    pygame.draw.line(screen, road, farm_pos, track_pos, max(3, C.s(12)))
+    pygame.draw.line(screen, road, track_pos, shop_pos, max(3, C.s(12)))
+    pygame.draw.line(screen, road, shop_pos, house_pos, max(3, C.s(12)))
+
+    # Map grid.
+    grid_color = (76, 145, 70)
+    for i in range(1, 8):
+        x = map_rect.left + map_rect.width * i // 8
+        pygame.draw.line(screen, grid_color, (x, map_rect.top), (x, map_rect.bottom), 1)
+    for i in range(1, 5):
+        y = map_rect.top + map_rect.height * i // 5
+        pygame.draw.line(screen, grid_color, (map_rect.left, y), (map_rect.right, y), 1)
+
+    pois = (
+        ("Race Track", track_pos, (225, 150, 60), None),
+        ("Farm", farm_pos, (255, 215, 90), None),
+        ("Shop", shop_pos, (230, 120, 70), "Closed" if nighttime else None),
+        ("Glue", house_pos, (130, 190, 220), "Closed" if nighttime else None),
+    )
+
+    marker_radius = max(8, C.s(16))
+    label_font = get_font(C.s(20), bold=True)
+    state_font = get_font(C.s(15), bold=True)
+
+    for name, pos, color, status in pois:
+        pygame.draw.circle(screen, C.DARK_BROWN, pos, marker_radius + C.s(4))
+        pygame.draw.circle(screen, color, pos, marker_radius)
+        pygame.draw.circle(screen, C.WORLD_WHITE, pos, marker_radius, max(2, C.s(3)))
+        label = label_font.render(name, True, C.WORLD_WHITE)
+        label_x = pos[0] + marker_radius + C.s(8)
+        label_y = pos[1] - label.get_height() // 2
+        if label_x + label.get_width() > map_rect.right:
+            label_x = pos[0] - marker_radius - C.s(8) - label.get_width()
+        label_bg = label.get_rect(topleft=(label_x, label_y)).inflate(C.s(12), C.s(8))
+        pygame.draw.rect(screen, (35, 55, 35), label_bg, border_radius=C.s(7))
+        screen.blit(label, label.get_rect(center=label_bg.center))
+        if status:
+            status_surf = state_font.render(status, True, (255, 170, 170))
+            status_rect = status_surf.get_rect(midtop=(pos[0], pos[1] + marker_radius + C.s(4)))
+            pygame.draw.rect(
+                screen,
+                (70, 45, 45),
+                status_rect.inflate(C.s(8), C.s(4)),
+                border_radius=C.s(5),
+            )
+            screen.blit(status_surf, status_rect)
+
+    player_pos = world_to_map(player.x, player.y)
+    pygame.draw.circle(screen, C.DARK_BROWN, player_pos, max(9, C.s(18)))
+    pygame.draw.circle(screen, (70, 190, 255), player_pos, max(6, C.s(12)))
+    pygame.draw.circle(screen, C.WORLD_WHITE, player_pos, max(2, C.s(5)))
+
+    hint = get_font(C.s(18), bold=True).render("Press M or Esc to close", True, C.WORLD_WHITE)
+    screen.blit(hint, hint.get_rect(midbottom=(panel.centerx, panel.bottom - C.s(12))))
 
 # ============================================================
 # FARM
